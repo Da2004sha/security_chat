@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import '../services/api.dart';
 import '../services/session.dart';
 import '../services/crypto_service.dart';
+import '../services/chat_key_service.dart';
 import 'chats.dart';
 
 class LoginScreen extends StatefulWidget {
@@ -112,6 +113,9 @@ class _LoginScreenState extends State<LoginScreen> {
       );
 
       await _ensureDeviceBoundToUser();
+
+      // подтягиваем chat keys, которые уже есть для этого устройства
+      await ChatKeyService.instance.importMyChatKeys();
 
       if (!mounted) return;
       Navigator.of(context).pushReplacement(

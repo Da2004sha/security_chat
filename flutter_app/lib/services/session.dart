@@ -1,3 +1,6 @@
+import 'dart:convert';
+import 'dart:typed_data';
+
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
 class Session {
@@ -10,20 +13,18 @@ class Session {
   int? userId;
   int? deviceId;
 
-  // Device crypto material (MUST survive logout)
   String? deviceName;
   String? x25519PrivateKeyB64;
   String? x25519PublicKeyB64;
 
-  // ---- keys in storage ----
   static const _kToken = "token";
   static const _kUserId = "userId";
-
-  // device keys MUST NOT be deleted on logout
   static const _kDeviceId = "deviceId";
   static const _kDeviceName = "deviceName";
   static const _kXPriv = "xPriv";
   static const _kXPub = "xPub";
+
+  static String _chatKeyStorageKey(int chatId) => "chatKey_$chatId";
 
   Future<void> init() async {
     token = await _storage.read(key: _kToken);
@@ -47,7 +48,6 @@ class Session {
       x25519PublicKeyB64 != null &&
       x25519PublicKeyB64!.isNotEmpty;
 
-  /// Token + user binding
   Future<void> saveAuth({required String token, required int userId}) async {
     this.token = token;
     this.userId = userId;
@@ -56,8 +56,6 @@ class Session {
     await _storage.write(key: _kUserId, value: userId.toString());
   }
 
-  /// Device binding (id + name + crypto keys)
-  /// IMPORTANT: keys must be stable for the device.
   Future<void> saveDevice({
     required int deviceId,
     required String deviceName,
@@ -75,19 +73,31 @@ class Session {
     await _storage.write(key: _kXPub, value: xPub);
   }
 
-  /// Logout MUST NOT delete device keys.
-  /// Otherwise E2EE breaks (MAC errors) after re-login.
+  Future<void> saveChatKey(int chatId, Uint8List key) async {
+    await _storage.write(
+      key: _chatKeyStorageKey(chatId),
+      value: base64Encode(key),
+    );
+  }
+
+  Future<Uint8List?> getChatKey(int chatId) async {
+    final raw = await _storage.read(key: _chatKeyStorageKey(chatId));
+    if (raw == null || raw.isEmpty) return null;
+    return Uint8List.fromList(base64Decode(raw));
+  }
+
+  Future<void> deleteChatKey(int chatId) async {
+    await _storage.delete(key: _chatKeyStorageKey(chatId));
+  }
+
   Future<void> logout() async {
     token = null;
     userId = null;
 
-    // keep deviceId + keys!
     await _storage.delete(key: _kToken);
     await _storage.delete(key: _kUserId);
   }
 
-  /// Use only if you really want to wipe the device completely
-  /// (e.g., reinstall scenario).
   Future<void> wipeDevice() async {
     token = null;
     userId = null;

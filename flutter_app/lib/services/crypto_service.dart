@@ -2,9 +2,18 @@ import 'dart:convert';
 import 'dart:math';
 import 'dart:typed_data';
 
+
 import 'package:cryptography/cryptography.dart';
 
 class CryptoService {
+  Uint8List randomBytes(int length) {
+  final bytes = Uint8List(length);
+  final r = Random.secure();
+  for (int i = 0; i < length; i++) {
+    bytes[i] = r.nextInt(256);
+  }
+  return bytes;
+}
   CryptoService._();
   static final CryptoService instance = CryptoService._();
 

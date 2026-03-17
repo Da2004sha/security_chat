@@ -1,5 +1,4 @@
 import os
-import json
 from fastapi import (
     FastAPI,
     Depends,
@@ -8,14 +7,13 @@ from fastapi import (
     File,
     WebSocket,
     Query,
-    Request,
 )
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 from sqlalchemy import select
 
 from .db import engine, Base, get_db
-from .models import User, Device, Chat, ChatMember, Message, Attachment
+from .models import User, Device, Chat, ChatMember, Message, Attachment, ChatKey
 from .schemas import *
 from .auth import (
     hash_password,
@@ -214,78 +212,91 @@ def list_chat_members(
     return [UserOut(id=u.id, username=u.username) for u in users]
 
 
-def _normalize_payload_json_for_storage(
-    raw_body: dict,
-    me: User,
-    db: Session,
-) -> tuple[int, int, str]:
-    chat_id = raw_body.get("chat_id")
-    sender_device_id = raw_body.get("sender_device_id")
-
-    if chat_id is None or sender_device_id is None:
-        raise HTTPException(422, "chat_id and sender_device_id are required")
-
-    dev = db.get(Device, int(sender_device_id))
-    if not dev or dev.user_id != me.id:
-        raise HTTPException(400, "Invalid device")
-
-    if "payload_json" in raw_body and raw_body.get("payload_json") is not None:
-        payload_json = raw_body["payload_json"]
-        if not isinstance(payload_json, str) or not payload_json.strip():
-            raise HTTPException(422, "payload_json must be a non-empty string")
-        return int(chat_id), int(sender_device_id), payload_json
-
-    payloads = raw_body.get("payloads")
-    if not isinstance(payloads, list) or len(payloads) == 0:
-        raise HTTPException(422, "Either payload_json or non-empty payloads is required")
-
-    payload_map: dict[str, str] = {}
-
-    for item in payloads:
-        if not isinstance(item, dict):
-            raise HTTPException(422, "Each payload must be an object")
-
-        recipient_device_id = item.get("recipient_device_id")
-        payload_json = item.get("payload_json")
-
-        if recipient_device_id is None or payload_json is None:
-            raise HTTPException(
-                422,
-                "recipient_device_id and payload_json are required in each payload",
-            )
-
-        target_device = db.get(Device, int(recipient_device_id))
-        if not target_device or not target_device.is_active:
-            raise HTTPException(400, f"Invalid recipient device: {recipient_device_id}")
-
-        if not isinstance(payload_json, str) or not payload_json.strip():
-            raise HTTPException(
-                422,
-                f"payload_json for recipient_device_id={recipient_device_id} must be a non-empty string",
-            )
-
-        payload_map[str(int(recipient_device_id))] = payload_json
-
-    wrapped = {
-        "multi_device": True,
-        "payloads": payload_map,
-    }
-
-    return int(chat_id), int(sender_device_id), json.dumps(wrapped, ensure_ascii=False)
-
-
-@app.post("/messages", response_model=MessageOut)
-async def send_message(
-    request: Request,
+@app.post("/chat_keys")
+def upsert_chat_key(
+    data: ChatKeyIn,
     me: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    raw_body = await request.json()
+    # отправитель должен быть участником чата
+    is_member = db.scalar(
+        select(ChatMember).where(
+            ChatMember.chat_id == data.chat_id,
+            ChatMember.user_id == me.id,
+        )
+    )
+    if not is_member:
+        raise HTTPException(403, "Not a member")
 
-    chat_id, sender_device_id, payload_json_to_store = _normalize_payload_json_for_storage(
-        raw_body, me, db
+    sender_device = db.get(Device, data.wrapped_by_device_id)
+    if not sender_device or sender_device.user_id != me.id:
+        raise HTTPException(400, "Invalid wrapped_by_device_id")
+
+    target_device = db.get(Device, data.device_id)
+    if not target_device or not target_device.is_active:
+        raise HTTPException(400, "Invalid target device")
+
+    existing = db.scalar(
+        select(ChatKey).where(
+            ChatKey.chat_id == data.chat_id,
+            ChatKey.device_id == data.device_id,
+        )
     )
 
+    if existing:
+        existing.wrapped_by_device_id = data.wrapped_by_device_id
+        existing.wrapped_key_json = data.wrapped_key_json
+        db.commit()
+        return {"status": "updated"}
+
+    ck = ChatKey(
+        chat_id=data.chat_id,
+        device_id=data.device_id,
+        wrapped_by_device_id=data.wrapped_by_device_id,
+        wrapped_key_json=data.wrapped_key_json,
+    )
+    db.add(ck)
+    db.commit()
+    return {"status": "created"}
+
+
+@app.get("/chat_keys/mine", response_model=list[ChatKeyOut])
+def get_my_chat_keys(
+    device_id: int,
+    me: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    my_device = db.get(Device, device_id)
+    if not my_device or my_device.user_id != me.id:
+        raise HTTPException(400, "Invalid device")
+
+    keys = db.scalars(
+        select(ChatKey).where(ChatKey.device_id == device_id)
+    ).all()
+
+    out: list[ChatKeyOut] = []
+    for k in keys:
+      wrapped_by = db.get(Device, k.wrapped_by_device_id)
+      if wrapped_by is None:
+          continue
+      out.append(
+          ChatKeyOut(
+              chat_id=k.chat_id,
+              device_id=k.device_id,
+              wrapped_by_device_id=k.wrapped_by_device_id,
+              wrapped_key_json=k.wrapped_key_json,
+              wrapped_by_pubkey_b64=wrapped_by.pubkey_b64,
+          )
+      )
+    return out
+
+
+@app.get("/chat_keys/by_chat/{chat_id}", response_model=list[ChatKeyDeviceOut])
+def get_chat_key_devices(
+    chat_id: int,
+    me: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
     is_member = db.scalar(
         select(ChatMember).where(
             ChatMember.chat_id == chat_id,
@@ -295,18 +306,44 @@ async def send_message(
     if not is_member:
         raise HTTPException(403, "Not a member")
 
+    rows = db.scalars(
+        select(ChatKey).where(ChatKey.chat_id == chat_id)
+    ).all()
+
+    return [ChatKeyDeviceOut(device_id=r.device_id) for r in rows]
+
+
+@app.post("/messages", response_model=MessageOut)
+def send_message(
+    data: MessageIn,
+    me: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    is_member = db.scalar(
+        select(ChatMember).where(
+            ChatMember.chat_id == data.chat_id,
+            ChatMember.user_id == me.id,
+        )
+    )
+    if not is_member:
+        raise HTTPException(403, "Not a member")
+
+    dev = db.get(Device, data.sender_device_id)
+    if not dev or dev.user_id != me.id:
+        raise HTTPException(400, "Invalid device")
+
     msg = Message(
-        chat_id=chat_id,
+        chat_id=data.chat_id,
         sender_user_id=me.id,
-        sender_device_id=sender_device_id,
-        payload_json=payload_json_to_store,
+        sender_device_id=data.sender_device_id,
+        payload_json=data.payload_json,
     )
     db.add(msg)
     db.commit()
     db.refresh(msg)
 
     member_ids = db.scalars(
-        select(ChatMember.user_id).where(ChatMember.chat_id == chat_id)
+        select(ChatMember.user_id).where(ChatMember.chat_id == data.chat_id)
     ).all()
 
     out = MessageOut(
