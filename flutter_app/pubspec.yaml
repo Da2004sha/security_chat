@@ -1,0 +1,38 @@
+name: secure_corp_chat
+description: Secure corporate chat (E2EE MVP)
+publish_to: "none"
+version: 0.1.0+1
+
+environment:
+  sdk: ">=3.4.0 <4.0.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  # network
+  http: ^1.2.2
+
+  # secure storage for token + device keys
+  flutter_secure_storage: ^9.2.2
+
+  # crypto (X25519 + HKDF + SecretBox)
+  cryptography: ^2.7.0
+
+  # file pick/upload
+  file_picker: ^8.1.2
+
+  # paths + saving files
+  path_provider: ^2.1.4
+  path: ^1.9.0
+
+  # open downloaded files (Android/Windows/macOS/Linux)
+  open_filex: ^4.5.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^3.0.0
+
+flutter:
+  uses-material-design: true

@@ -1,0 +1,30 @@
+services:
+  db:
+    image: postgres:16
+    container_name: secure_corp_chat-db
+    environment:
+      POSTGRES_DB: secure_chat
+      POSTGRES_USER: secure
+      POSTGRES_PASSWORD: secure
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U secure -d secure_chat"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    build: ./backend
+    container_name: secure_corp_chat-backend
+    environment:
+      DATABASE_URL: postgresql+psycopg://secure:secure@db:5432/secure_chat
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "8001:8000"
+
+volumes:
+  pgdata:
+  uploads:

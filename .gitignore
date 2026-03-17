@@ -1,0 +1,44 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+env/
+
+# Flutter / Dart
+.flutter-plugins
+.flutter-plugins-dependencies
+.dart_tool/
+.packages
+build/
+.flutter-plugins
+pubspec.lock
+
+# Android / Gradle
+android/.gradle/
+**/local.properties
+**/captures/
+.gradle/
+
+# iOS / macOS
+ios/Pods/
+ios/.symlinks/
+macos/Pods/
+macos/.symlinks/
+
+# Windows
+windows/flutter/ephemeral/
+
+# IDE
+.idea/
+.vscode/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Secrets / env
+.env
+*.env
+
+# Uploads / runtime files
+backend/uploads/
