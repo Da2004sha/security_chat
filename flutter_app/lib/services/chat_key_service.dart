@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
 
@@ -39,6 +40,7 @@ class ChatKeyService {
         );
 
         final chatKeyB64 = plain["chat_key_b64"] as String;
+
         await Session.instance.saveChatKey(
           chatId,
           Uint8List.fromList(base64Decode(chatKeyB64)),
@@ -82,8 +84,7 @@ class ChatKeyService {
     required int chatId,
     required Uint8List chatKey,
   }) async {
-    final existingRows =
-        await Api.instance.getList("/chat_keys/by_chat/$chatId");
+    final existingRows = await Api.instance.getList("/chat_keys/by_chat/$chatId");
     final existingDeviceIds = existingRows
         .cast<Map<String, dynamic>>()
         .map((e) => e["device_id"] as int)
@@ -102,23 +103,76 @@ class ChatKeyService {
 
         if (existingDeviceIds.contains(targetDeviceId)) continue;
 
-        await publishChatKeyForDevice(
-          chatId: chatId,
-          chatKey: chatKey,
-          targetDeviceId: targetDeviceId,
-          targetPubB64: targetPub,
-        );
+        try {
+          await publishChatKeyForDevice(
+            chatId: chatId,
+            chatKey: chatKey,
+            targetDeviceId: targetDeviceId,
+            targetPubB64: targetPub,
+          );
+        } catch (e) {
+          debugPrint(
+            "publishChatKeyToAllParticipants failed for chat=$chatId device=$targetDeviceId: $e",
+          );
+        }
       }
     }
   }
 
-  Future<void> ensureChatKeyAvailable(int chatId) async {
+  Future<void> syncChatKeyForChat(int chatId) async {
+    final local = await Session.instance.getChatKey(chatId);
+
+    if (local != null) {
+      await publishChatKeyToAllParticipants(
+        chatId: chatId,
+        chatKey: local,
+      );
+      return;
+    }
+
     await importMyChatKeys();
   }
 
+  Future<Uint8List?> ensureChatKey({
+    required int chatId,
+    int retries = 6,
+    Duration delay = const Duration(milliseconds: 700),
+  }) async {
+    for (var i = 0; i < retries; i++) {
+      final local = await Session.instance.getChatKey(chatId);
+      if (local != null) {
+        try {
+          await publishChatKeyToAllParticipants(
+            chatId: chatId,
+            chatKey: local,
+          );
+        } catch (e) {
+          debugPrint("ensureChatKey publish failed for chat=$chatId: $e");
+        }
+        return local;
+      }
+
+      await importMyChatKeys();
+
+      final imported = await Session.instance.getChatKey(chatId);
+      if (imported != null) {
+        return imported;
+      }
+
+      if (i < retries - 1) {
+        await Future.delayed(delay);
+      }
+    }
+
+    return null;
+  }
+
+  Future<void> ensureChatKeyAvailable(int chatId) async {
+    await ensureChatKey(chatId: chatId);
+  }
+
   Future<Uint8List?> getChatKey(int chatId) async {
-    await importMyChatKeys();
-    return Session.instance.getChatKey(chatId);
+    return ensureChatKey(chatId: chatId, retries: 1, delay: Duration.zero);
   }
 
   Future<int> createChatAndDistributeKey({

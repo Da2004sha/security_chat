@@ -10,23 +10,14 @@ dependencies:
   flutter:
     sdk: flutter
 
-  # network
+  record: ^6.2.0
+
   http: ^1.2.2
-
-  # secure storage for token + device keys
   flutter_secure_storage: ^9.2.2
-
-  # crypto (X25519 + HKDF + SecretBox)
   cryptography: ^2.7.0
-
-  # file pick/upload
   file_picker: ^8.1.2
-
-  # paths + saving files
   path_provider: ^2.1.4
   path: ^1.9.0
-
-  # open downloaded files (Android/Windows/macOS/Linux)
   open_filex: ^4.5.0
 
 dev_dependencies:

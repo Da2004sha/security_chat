@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
 
+import '../services/api.dart';
 import '../services/chat_key_service.dart';
+import '../services/crypto_service.dart';
+import '../services/session.dart';
 
 class CreateChatScreen extends StatefulWidget {
   const CreateChatScreen({super.key});
@@ -10,87 +13,150 @@ class CreateChatScreen extends StatefulWidget {
 }
 
 class _CreateChatScreenState extends State<CreateChatScreen> {
-  final _members = TextEditingController();
-  final _title = TextEditingController();
+  final _membersController = TextEditingController();
+  final _titleController = TextEditingController();
 
-  bool _isGroup = false;
   bool _busy = false;
-  String? err;
+  bool _isGroup = false;
+  String? _err;
 
   @override
   void dispose() {
-    _members.dispose();
-    _title.dispose();
+    _membersController.dispose();
+    _titleController.dispose();
     super.dispose();
   }
 
-  Future<void> create() async {
+  List<String> _parseMembers() {
+    return _membersController.text
+        .split(",")
+        .map((e) => e.trim())
+        .where((e) => e.isNotEmpty)
+        .toSet()
+        .toList();
+  }
+
+  Future<void> _create() async {
     if (_busy) return;
 
+    final members = _parseMembers();
+    final title = _titleController.text.trim();
+
+    if (members.isEmpty) {
+      setState(() {
+        _err = "Укажи хотя бы одного пользователя";
+      });
+      return;
+    }
+
+    if (_isGroup && title.isEmpty) {
+      setState(() {
+        _err = "Для группового чата укажи название";
+      });
+      return;
+    }
+
     setState(() {
-      err = null;
       _busy = true;
+      _err = null;
     });
 
     try {
-      final usernames = _members.text
-          .split(',')
-          .map((e) => e.trim())
-          .where((e) => e.isNotEmpty)
-          .toList();
+      final result = await Api.instance.post("/chats", {
+        "member_usernames": members,
+        "is_group": _isGroup,
+        "title": title.isEmpty ? null : title,
+      });
 
-      if (usernames.isEmpty) {
-        throw Exception("Укажи хотя бы одного участника");
-      }
+      final chatId = result["id"] as int;
 
-      await ChatKeyService.instance.createChatAndDistributeKey(
-        memberUsernames: usernames,
-        isGroup: _isGroup,
-        title: _isGroup ? _title.text.trim() : null,
+      final chatKey = CryptoService.instance.randomBytes(32);
+      await Session.instance.saveChatKey(chatId, chatKey);
+
+      await ChatKeyService.instance.publishChatKeyToAllParticipants(
+        chatId: chatId,
+        chatKey: chatKey,
       );
 
       if (!mounted) return;
       Navigator.of(context).pop(true);
     } catch (e) {
-      setState(() => err = e.toString());
-    } finally {
-      if (mounted) {
-        setState(() => _busy = false);
-      }
+      if (!mounted) return;
+      setState(() {
+        _err = e.toString();
+        _busy = false;
+      });
     }
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text("Create chat")),
+      appBar: AppBar(
+        title: const Text("Create chat"),
+      ),
       body: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(
           children: [
+            if (_err != null)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 12),
+                child: Text(
+                  _err!,
+                  style: const TextStyle(color: Colors.red),
+                ),
+              ),
             SwitchListTile(
-              value: _isGroup,
-              onChanged: _busy ? null : (v) => setState(() => _isGroup = v),
+              contentPadding: EdgeInsets.zero,
               title: const Text("Group chat"),
+              value: _isGroup,
+              onChanged: _busy
+                  ? null
+                  : (v) {
+                      setState(() {
+                        _isGroup = v;
+                      });
+                    },
             ),
             if (_isGroup)
-              TextField(
-                controller: _title,
-                decoration: const InputDecoration(labelText: "Group title"),
+              Padding(
+                padding: const EdgeInsets.only(bottom: 12),
+                child: TextField(
+                  controller: _titleController,
+                  enabled: !_busy,
+                  decoration: const InputDecoration(
+                    labelText: "Group title",
+                    border: OutlineInputBorder(),
+                  ),
+                ),
               ),
             TextField(
-              controller: _members,
+              controller: _membersController,
+              enabled: !_busy,
+              minLines: 1,
+              maxLines: 3,
               decoration: const InputDecoration(
-                labelText: "Members usernames (comma separated)",
+                labelText: "Usernames",
+                hintText: "user1, user2",
+                border: OutlineInputBorder(),
               ),
             ),
             const SizedBox(height: 12),
-            if (err != null)
-              Text(err!, style: const TextStyle(color: Colors.red)),
-            const SizedBox(height: 12),
-            FilledButton(
-              onPressed: _busy ? null : create,
-              child: Text(_busy ? "Creating..." : "Create"),
+            const Align(
+              alignment: Alignment.centerLeft,
+              child: Text(
+                "Укажи username через запятую",
+                style: TextStyle(fontSize: 12, color: Colors.grey),
+              ),
+            ),
+            const SizedBox(height: 20),
+            SizedBox(
+              width: double.infinity,
+              child: FilledButton(
+                onPressed: _busy ? null : _create,
+                child: Text(_busy ? "Creating..." : "Create"),
+              ),
             ),
           ],
         ),

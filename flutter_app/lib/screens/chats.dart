@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 
 import '../services/api.dart';
-import '../services/session.dart';
 import '../services/chat_key_service.dart';
+import '../services/session.dart';
 import 'chat_view.dart';
 import 'create_chat.dart';
 import 'login.dart';
@@ -26,22 +26,25 @@ class _ChatsScreenState extends State<ChatsScreen> {
   }
 
   Future<void> _load() async {
+    if (!mounted) return;
+
     setState(() {
       loading = true;
       err = null;
     });
 
     try {
-      // 🔥 ВАЖНО: подтягиваем chat keys
       await ChatKeyService.instance.importMyChatKeys();
 
       final res = await Api.instance.getList("/chats");
 
+      if (!mounted) return;
       setState(() {
         chats = res.cast<Map<String, dynamic>>();
         loading = false;
       });
     } catch (e) {
+      if (!mounted) return;
       setState(() {
         err = e.toString();
         loading = false;
@@ -134,7 +137,7 @@ class _ChatsScreenState extends State<ChatsScreen> {
                             return ListTile(
                               title: Text(_chatTitle(chat)),
                               subtitle: Text(
-                                (chat["is_group"] == true)
+                                chat["is_group"] == true
                                     ? "Group"
                                     : "Direct chat",
                               ),

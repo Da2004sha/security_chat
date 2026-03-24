@@ -17,6 +17,51 @@ class MessageTile extends StatelessWidget {
     final sender = message["sender_user_id"]?.toString() ?? "?";
     final createdAt = message["created_at"]?.toString() ?? "";
 
+    // =========================
+    // 🎤 VOICE MESSAGE
+    // =========================
+    if (type == "voice") {
+      return Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+        child: Align(
+          alignment: Alignment.centerRight,
+          child: GestureDetector(
+            onTap: onOpenFile == null ? null : () => onOpenFile!(message),
+            child: Container(
+              width: 220,
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Colors.blue.withOpacity(0.15),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Row(
+                children: [
+                  const Icon(Icons.play_arrow),
+                  const SizedBox(width: 8),
+                  const Expanded(
+                    child: Text(
+                      "Voice message",
+                      style: TextStyle(fontSize: 14),
+                    ),
+                  ),
+                  Text(
+                    createdAt,
+                    style: TextStyle(
+                      color: Colors.black.withOpacity(0.5),
+                      fontSize: 10,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      );
+    }
+
+    // =========================
+    // 📎 FILE
+    // =========================
     if (type == "file") {
       final name = (message["name"] ?? "file").toString();
 
@@ -36,7 +81,10 @@ class MessageTile extends StatelessWidget {
               children: [
                 Text(
                   "📎 $name",
-                  style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
+                  style: const TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w600,
+                  ),
                   overflow: TextOverflow.ellipsis,
                 ),
                 const SizedBox(height: 6),
@@ -45,12 +93,16 @@ class MessageTile extends StatelessWidget {
                     Expanded(
                       child: Text(
                         createdAt,
-                        style: TextStyle(color: Colors.black.withOpacity(0.5), fontSize: 12),
+                        style: TextStyle(
+                          color: Colors.black.withOpacity(0.5),
+                          fontSize: 12,
+                        ),
                         overflow: TextOverflow.ellipsis,
                       ),
                     ),
                     TextButton(
-                      onPressed: onOpenFile == null ? null : () => onOpenFile!(message),
+                      onPressed:
+                          onOpenFile == null ? null : () => onOpenFile!(message),
                       child: const Text("Открыть"),
                     )
                   ],
@@ -58,7 +110,10 @@ class MessageTile extends StatelessWidget {
                 const SizedBox(height: 2),
                 Text(
                   "from user $sender",
-                  style: TextStyle(color: Colors.black.withOpacity(0.4), fontSize: 11),
+                  style: TextStyle(
+                    color: Colors.black.withOpacity(0.4),
+                    fontSize: 11,
+                  ),
                 ),
               ],
             ),
@@ -67,7 +122,9 @@ class MessageTile extends StatelessWidget {
       );
     }
 
-    // text message
+    // =========================
+    // 💬 TEXT
+    // =========================
     final text = (message["text"] ?? "").toString();
 
     return Padding(
@@ -87,12 +144,18 @@ class MessageTile extends StatelessWidget {
               const SizedBox(height: 6),
               Text(
                 createdAt,
-                style: TextStyle(color: Colors.black.withOpacity(0.5), fontSize: 12),
+                style: TextStyle(
+                  color: Colors.black.withOpacity(0.5),
+                  fontSize: 12,
+                ),
               ),
               const SizedBox(height: 2),
               Text(
                 "from user $sender",
-                style: TextStyle(color: Colors.black.withOpacity(0.4), fontSize: 11),
+                style: TextStyle(
+                  color: Colors.black.withOpacity(0.4),
+                  fontSize: 11,
+                ),
               ),
             ],
           ),
