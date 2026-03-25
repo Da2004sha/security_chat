@@ -3,13 +3,14 @@ import 'package:flutter/material.dart';
 class AppTheme {
   static const Color primary = Color(0xFF2AABEE);
   static const Color primaryDark = Color(0xFF229ED9);
-  static const Color background = Color(0xFFF4F7FB);
+  static const Color background = Color(0xFFEFF3F8);
+  static const Color chatBackground = Color(0xFFDDE6EF);
   static const Color surface = Colors.white;
   static const Color textPrimary = Color(0xFF1F2A37);
   static const Color textSecondary = Color(0xFF6B7280);
   static const Color bubbleMine = Color(0xFFE3F2FD);
   static const Color bubbleOther = Colors.white;
-  static const Color border = Color(0xFFDCE4EE);
+  static const Color border = Color(0xFFD7E0EA);
   static const Color danger = Color(0xFFDC2626);
 
   static ThemeData light() {
@@ -52,28 +53,25 @@ class AppTheme {
         fillColor: surface,
         hintStyle: const TextStyle(color: textSecondary),
         labelStyle: const TextStyle(color: textSecondary),
-        contentPadding: const EdgeInsets.symmetric(
-          horizontal: 16,
-          vertical: 16,
-        ),
+        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
         border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(18),
+          borderRadius: BorderRadius.circular(20),
           borderSide: const BorderSide(color: border),
         ),
         enabledBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(18),
+          borderRadius: BorderRadius.circular(20),
           borderSide: const BorderSide(color: border),
         ),
         focusedBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(18),
+          borderRadius: BorderRadius.circular(20),
           borderSide: const BorderSide(color: primary),
         ),
         errorBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(18),
+          borderRadius: BorderRadius.circular(20),
           borderSide: const BorderSide(color: danger),
         ),
         focusedErrorBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(18),
+          borderRadius: BorderRadius.circular(20),
           borderSide: const BorderSide(color: danger),
         ),
       ),

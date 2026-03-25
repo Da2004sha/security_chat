@@ -19,6 +19,8 @@ class _ChatsScreenState extends State<ChatsScreen> {
   bool loading = true;
   String? err;
   List<Map<String, dynamic>> chats = [];
+  Map<int, List<Map<String, dynamic>>> _membersByChat = {};
+  String _search = '';
 
   @override
   void initState() {
@@ -37,10 +39,23 @@ class _ChatsScreenState extends State<ChatsScreen> {
     try {
       await ChatKeyService.instance.importMyChatKeys();
       final res = await Api.instance.getList('/chats');
+      final loadedChats = res.cast<Map<String, dynamic>>();
+      final membersByChat = <int, List<Map<String, dynamic>>>{};
+
+      for (final chat in loadedChats) {
+        final id = chat['id'];
+        if (id is int) {
+          try {
+            final members = await Api.instance.getList('/chats/$id/members');
+            membersByChat[id] = members.cast<Map<String, dynamic>>();
+          } catch (_) {}
+        }
+      }
 
       if (!mounted) return;
       setState(() {
-        chats = res.cast<Map<String, dynamic>>();
+        chats = loadedChats;
+        _membersByChat = membersByChat;
         loading = false;
       });
     } catch (e) {
@@ -78,15 +93,26 @@ class _ChatsScreenState extends State<ChatsScreen> {
       return title;
     }
 
-    return chat['is_group'] == true
-        ? 'Групповой чат #${chat['id']}'
-        : 'Личный чат #${chat['id']}';
+    final members = _membersByChat[chat['id'] as int? ?? -1] ?? const [];
+    if (chat['is_group'] == true) {
+      return members.isEmpty ? 'Групповой чат' : members.map((e) => e['username']).join(', ');
+    }
+
+    for (final member in members) {
+      if (member['id'] != Session.instance.userId) {
+        return member['username']?.toString() ?? 'Личный чат';
+      }
+    }
+    return 'Личный чат';
   }
 
   String _chatSubtitle(Map<String, dynamic> chat) {
-    return chat['is_group'] == true
-        ? 'Групповой защищённый чат'
-        : 'Личный защищённый чат';
+    final members = _membersByChat[chat['id'] as int? ?? -1] ?? const [];
+    if (chat['is_group'] == true) {
+      if (members.isEmpty) return 'Групповой защищённый чат';
+      return '${members.length} участников';
+    }
+    return 'Личный защищённый чат';
   }
 
   Future<void> _openChat(Map<String, dynamic> chat) async {
@@ -102,8 +128,20 @@ class _ChatsScreenState extends State<ChatsScreen> {
     await _load();
   }
 
+  List<Map<String, dynamic>> get _filteredChats {
+    if (_search.trim().isEmpty) return chats;
+    final q = _search.trim().toLowerCase();
+    return chats.where((chat) {
+      final title = _chatTitle(chat).toLowerCase();
+      final subtitle = _chatSubtitle(chat).toLowerCase();
+      return title.contains(q) || subtitle.contains(q);
+    }).toList();
+  }
+
   @override
   Widget build(BuildContext context) {
+    final filtered = _filteredChats;
+
     return Scaffold(
       appBar: AppBar(
         title: const Text('Защищённый чат'),
@@ -127,9 +165,19 @@ class _ChatsScreenState extends State<ChatsScreen> {
       ),
       body: Column(
         children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 12, 16, 10),
+            child: TextField(
+              onChanged: (value) => setState(() => _search = value),
+              decoration: const InputDecoration(
+                hintText: 'Поиск по чатам',
+                prefixIcon: Icon(Icons.search_rounded),
+              ),
+            ),
+          ),
           if (err != null)
             Padding(
-              padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 10),
               child: Container(
                 width: double.infinity,
                 padding: const EdgeInsets.all(14),
@@ -149,7 +197,7 @@ class _ChatsScreenState extends State<ChatsScreen> {
           Expanded(
             child: loading
                 ? const Center(child: CircularProgressIndicator())
-                : chats.isEmpty
+                : filtered.isEmpty
                     ? RefreshIndicator(
                         onRefresh: _load,
                         child: ListView(
@@ -185,44 +233,67 @@ class _ChatsScreenState extends State<ChatsScreen> {
                     : RefreshIndicator(
                         onRefresh: _load,
                         child: ListView.separated(
-                          padding: const EdgeInsets.fromLTRB(16, 12, 16, 96),
-                          itemCount: chats.length,
+                          padding: const EdgeInsets.fromLTRB(16, 6, 16, 96),
+                          itemCount: filtered.length,
                           separatorBuilder: (_, __) => const SizedBox(height: 10),
                           itemBuilder: (context, index) {
-                            final chat = chats[index];
+                            final chat = filtered[index];
                             final isGroup = chat['is_group'] == true;
+                            final title = _chatTitle(chat);
+                            final subtitle = _chatSubtitle(chat);
+                            final avatarText = title.isNotEmpty ? title.characters.first.toUpperCase() : '#';
 
                             return Card(
-                              child: ListTile(
-                                contentPadding: const EdgeInsets.symmetric(
-                                  horizontal: 16,
-                                  vertical: 8,
-                                ),
-                                leading: CircleAvatar(
-                                  backgroundColor: isGroup
-                                      ? AppTheme.primary.withOpacity(0.14)
-                                      : const Color(0xFFE8F5E9),
-                                  foregroundColor: isGroup
-                                      ? AppTheme.primaryDark
-                                      : const Color(0xFF2E7D32),
-                                  child: Icon(
-                                    isGroup
-                                        ? Icons.groups_rounded
-                                        : Icons.person_rounded,
-                                  ),
-                                ),
-                                title: Text(
-                                  _chatTitle(chat),
-                                  style: const TextStyle(
-                                    fontWeight: FontWeight.w700,
-                                  ),
-                                ),
-                                subtitle: Padding(
-                                  padding: const EdgeInsets.only(top: 4),
-                                  child: Text(_chatSubtitle(chat)),
-                                ),
-                                trailing: const Icon(Icons.chevron_right_rounded),
+                              child: InkWell(
+                                borderRadius: BorderRadius.circular(24),
                                 onTap: () => _openChat(chat),
+                                child: Padding(
+                                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                                  child: Row(
+                                    children: [
+                                      CircleAvatar(
+                                        radius: 26,
+                                        backgroundColor: isGroup ? const Color(0x1F2AABEE) : const Color(0xFFE8F5E9),
+                                        foregroundColor: isGroup ? AppTheme.primaryDark : const Color(0xFF2E7D32),
+                                        child: isGroup
+                                            ? const Icon(Icons.groups_rounded)
+                                            : Text(
+                                                avatarText,
+                                                style: const TextStyle(fontWeight: FontWeight.w800),
+                                              ),
+                                      ),
+                                      const SizedBox(width: 14),
+                                      Expanded(
+                                        child: Column(
+                                          crossAxisAlignment: CrossAxisAlignment.start,
+                                          children: [
+                                            Text(
+                                              title,
+                                              maxLines: 1,
+                                              overflow: TextOverflow.ellipsis,
+                                              style: const TextStyle(
+                                                fontWeight: FontWeight.w700,
+                                                fontSize: 16,
+                                              ),
+                                            ),
+                                            const SizedBox(height: 5),
+                                            Text(
+                                              subtitle,
+                                              maxLines: 1,
+                                              overflow: TextOverflow.ellipsis,
+                                              style: const TextStyle(
+                                                color: AppTheme.textSecondary,
+                                                fontSize: 13,
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                      const SizedBox(width: 8),
+                                      const Icon(Icons.chevron_right_rounded, color: AppTheme.textSecondary),
+                                    ],
+                                  ),
+                                ),
                               ),
                             );
                           },

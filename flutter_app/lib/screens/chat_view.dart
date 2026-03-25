@@ -43,6 +43,8 @@ class _ChatViewScreenState extends State<ChatViewScreen> {
 
   List<Map<String, dynamic>> messages = [];
   Uint8List? _chatKey;
+  Map<int, String> _usernamesById = {};
+  List<Map<String, dynamic>> _members = [];
 
   Timer? _timer;
 
@@ -80,6 +82,20 @@ class _ChatViewScreenState extends State<ChatViewScreen> {
     }
   }
 
+  Future<void> _loadMembers() async {
+    final members = await Api.instance.getList('/chats/${widget.chatId}/members');
+    final usernamesById = <int, String>{};
+    for (final raw in members.cast<Map<String, dynamic>>()) {
+      final id = raw['id'];
+      final username = raw['username']?.toString();
+      if (id is int && username != null && username.isNotEmpty) {
+        usernamesById[id] = username;
+      }
+    }
+    _members = members.cast<Map<String, dynamic>>();
+    _usernamesById = usernamesById;
+  }
+
   void _scrollToBottom({bool animated = true}) {
     if (!_scrollController.hasClients) return;
     final target = _scrollController.position.maxScrollExtent + 80;
@@ -109,9 +125,9 @@ class _ChatViewScreenState extends State<ChatViewScreen> {
     try {
       await ChatKeyService.instance.syncChatKeyForChat(widget.chatId);
       await _ensureChatKey();
+      await _loadMembers();
 
-      final res =
-          await Api.instance.getList('/chats/${widget.chatId}/messages?limit=100');
+      final res = await Api.instance.getList('/chats/${widget.chatId}/messages?limit=100');
 
       final out = <Map<String, dynamic>>[];
 
@@ -120,13 +136,16 @@ class _ChatViewScreenState extends State<ChatViewScreen> {
           final plain = await CryptoService.instance.decryptJson(
             payloadJson: m['payload_json'],
             key: _chatKey!,
+            aad: 'chat:${widget.chatId}',
           );
 
+          final senderId = m['sender_user_id'] as int?;
           out.add({
             'id': m['id'],
-            'sender_user_id': m['sender_user_id'],
+            'sender_user_id': senderId,
             'sender_device_id': m['sender_device_id'],
             'created_at': m['created_at'],
+            'sender_username': _usernamesById[senderId ?? -1] ?? 'Пользователь',
             ...plain,
           });
         } catch (e) {
@@ -345,6 +364,7 @@ class _ChatViewScreenState extends State<ChatViewScreen> {
           'file_key_b64': base64Encode(fileKey),
           'duration_ms': result.durationMs,
           'ext': 'm4a',
+          'name': 'Голосовое сообщение',
         },
         key: _chatKey!,
         aad: 'chat:${widget.chatId}',
@@ -453,108 +473,221 @@ class _ChatViewScreenState extends State<ChatViewScreen> {
     }
   }
 
+  String _chatSubtitle() {
+    if (_members.isEmpty) return 'Защищённая переписка';
+    if (_members.length == 2) {
+      final other = _members.firstWhere(
+        (m) => m['id'] != Session.instance.userId,
+        orElse: () => _members.first,
+      );
+      return other['username']?.toString() ?? 'Личный чат';
+    }
+    return '${_members.length} участников';
+  }
+
+  String _dateHeaderText(String? raw) {
+    final date = MessageTile.parseMoscowDate(raw);
+    if (date == null) return '';
+
+    final now = DateTime.now().toUtc().add(const Duration(hours: 3));
+    final msgDate = DateTime(date.year, date.month, date.day);
+    final nowDate = DateTime(now.year, now.month, now.day);
+    final diff = nowDate.difference(msgDate).inDays;
+
+    if (diff == 0) return 'Сегодня';
+    if (diff == 1) return 'Вчера';
+
+    const months = [
+      'января',
+      'февраля',
+      'марта',
+      'апреля',
+      'мая',
+      'июня',
+      'июля',
+      'августа',
+      'сентября',
+      'октября',
+      'ноября',
+      'декабря',
+    ];
+    return '${date.day} ${months[date.month - 1]}';
+  }
+
+  bool _needsDateHeader(int index) {
+    if (index == 0) return true;
+    final current = MessageTile.parseMoscowDate(messages[index]['created_at']?.toString());
+    final previous = MessageTile.parseMoscowDate(messages[index - 1]['created_at']?.toString());
+    if (current == null || previous == null) return false;
+    return current.year != previous.year || current.month != previous.month || current.day != previous.day;
+  }
+
+  bool _shouldShowSender(int index) {
+    final current = messages[index];
+    if (current['sender_user_id'] == Session.instance.userId) return false;
+    if (index == 0) return true;
+    final previous = messages[index - 1];
+    if (_needsDateHeader(index)) return true;
+    return previous['sender_user_id'] != current['sender_user_id'];
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: Text(widget.title)),
-      body: Column(
-        children: [
-          if (err != null)
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
-              child: Container(
-                width: double.infinity,
-                padding: const EdgeInsets.all(14),
-                decoration: BoxDecoration(
-                  color: const Color(0xFFFEECEC),
-                  borderRadius: BorderRadius.circular(16),
-                ),
-                child: Text(
-                  err!,
-                  style: const TextStyle(
-                    color: AppTheme.danger,
-                    fontWeight: FontWeight.w600,
+      appBar: AppBar(
+        titleSpacing: 0,
+        title: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(widget.title, overflow: TextOverflow.ellipsis),
+            const SizedBox(height: 2),
+            Text(
+              _chatSubtitle(),
+              style: const TextStyle(
+                fontSize: 12,
+                color: AppTheme.textSecondary,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+          ],
+        ),
+      ),
+      body: Container(
+        color: AppTheme.chatBackground,
+        child: Column(
+          children: [
+            if (err != null)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+                child: Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(14),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFFEECEC),
+                    borderRadius: BorderRadius.circular(16),
+                  ),
+                  child: Text(
+                    err!,
+                    style: const TextStyle(
+                      color: AppTheme.danger,
+                      fontWeight: FontWeight.w600,
+                    ),
                   ),
                 ),
               ),
-            ),
-          Expanded(
-            child: loading
-                ? const Center(child: CircularProgressIndicator())
-                : messages.isEmpty
-                    ? const Center(
-                        child: Text(
-                          'Сообщений пока нет',
-                          style: TextStyle(
-                            color: AppTheme.textSecondary,
-                            fontSize: 16,
+            Expanded(
+              child: loading
+                  ? const Center(child: CircularProgressIndicator())
+                  : messages.isEmpty
+                      ? const Center(
+                          child: Text(
+                            'Сообщений пока нет',
+                            style: TextStyle(
+                              color: AppTheme.textSecondary,
+                              fontSize: 16,
+                            ),
                           ),
+                        )
+                      : ListView.builder(
+                          controller: _scrollController,
+                          padding: const EdgeInsets.fromLTRB(12, 12, 12, 18),
+                          itemCount: messages.length,
+                          itemBuilder: (c, i) {
+                            final msg = messages[i];
+                            final showDateHeader = _needsDateHeader(i);
+                            final senderName = msg['sender_username']?.toString() ?? 'Пользователь';
+                            final isMine = msg['sender_user_id'] == Session.instance.userId;
+                            final showSender = _shouldShowSender(i);
+
+                            return Column(
+                              children: [
+                                if (showDateHeader)
+                                  Padding(
+                                    padding: const EdgeInsets.symmetric(vertical: 10),
+                                    child: Container(
+                                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+                                      decoration: BoxDecoration(
+                                        color: const Color(0xFFF2F4F7),
+                                        borderRadius: BorderRadius.circular(999),
+                                        border: Border.all(color: AppTheme.border),
+                                      ),
+                                      child: Text(
+                                        _dateHeaderText(msg['created_at']?.toString()),
+                                        style: const TextStyle(
+                                          fontSize: 12,
+                                          fontWeight: FontWeight.w600,
+                                          color: AppTheme.textSecondary,
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                MessageTile(
+                                  message: msg,
+                                  isMine: isMine,
+                                  senderName: senderName,
+                                  showSender: showSender,
+                                  onOpenFile: _handleOpenAttachment,
+                                ),
+                              ],
+                            );
+                          },
                         ),
-                      )
-                    : ListView.builder(
-                        controller: _scrollController,
-                        padding: const EdgeInsets.fromLTRB(12, 12, 12, 18),
-                        itemCount: messages.length,
-                        itemBuilder: (c, i) => MessageTile(
-                          message: messages[i],
-                          myUserId: Session.instance.userId,
-                          onOpenFile: _handleOpenAttachment,
-                        ),
-                      ),
-          ),
-          SafeArea(
-            top: false,
-            child: Container(
-              padding: const EdgeInsets.fromLTRB(10, 8, 10, 10),
-              decoration: const BoxDecoration(
-                color: Colors.white,
-                border: Border(top: BorderSide(color: AppTheme.border)),
-              ),
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.end,
-                children: [
-                  IconButton(
-                    tooltip: 'Прикрепить файл',
-                    icon: const Icon(Icons.attach_file_rounded),
-                    onPressed: _sendFile,
-                  ),
-                  if (_canRecordVoice)
+            ),
+            SafeArea(
+              top: false,
+              child: Container(
+                padding: const EdgeInsets.fromLTRB(10, 8, 10, 10),
+                decoration: const BoxDecoration(
+                  color: Colors.white,
+                  border: Border(top: BorderSide(color: AppTheme.border)),
+                ),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  children: [
                     IconButton(
-                      tooltip: 'Голосовое сообщение',
-                      icon: Icon(
-                        recording ? Icons.mic_rounded : Icons.mic_none_rounded,
-                        color: recording ? Colors.red : null,
+                      tooltip: 'Прикрепить файл',
+                      icon: const Icon(Icons.attach_file_rounded),
+                      onPressed: _sendFile,
+                    ),
+                    if (_canRecordVoice)
+                      IconButton(
+                        tooltip: 'Голосовое сообщение',
+                        icon: Icon(
+                          recording ? Icons.mic_rounded : Icons.mic_none_rounded,
+                          color: recording ? Colors.red : null,
+                        ),
+                        onPressed: recording ? null : _sendVoice,
                       ),
-                      onPressed: recording ? null : _sendVoice,
-                    ),
-                  Expanded(
-                    child: TextField(
-                      controller: _text,
-                      minLines: 1,
-                      maxLines: 4,
-                      textInputAction: TextInputAction.send,
-                      onSubmitted: (_) => _sendText(),
-                      decoration: const InputDecoration(
-                        hintText: 'Сообщение',
-                        isDense: true,
+                    Expanded(
+                      child: TextField(
+                        controller: _text,
+                        minLines: 1,
+                        maxLines: 4,
+                        textInputAction: TextInputAction.send,
+                        onSubmitted: (_) => _sendText(),
+                        decoration: const InputDecoration(
+                          hintText: 'Сообщение',
+                          isDense: true,
+                        ),
                       ),
                     ),
-                  ),
-                  const SizedBox(width: 6),
-                  FilledButton(
-                    onPressed: _sendText,
-                    style: FilledButton.styleFrom(
-                      minimumSize: const Size(52, 52),
-                      padding: EdgeInsets.zero,
-                      shape: const CircleBorder(),
+                    const SizedBox(width: 6),
+                    FilledButton(
+                      onPressed: _sendText,
+                      style: FilledButton.styleFrom(
+                        minimumSize: const Size(52, 52),
+                        padding: EdgeInsets.zero,
+                        shape: const CircleBorder(),
+                      ),
+                      child: const Icon(Icons.send_rounded),
                     ),
-                    child: const Icon(Icons.send_rounded),
-                  ),
-                ],
+                  ],
+                ),
               ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
