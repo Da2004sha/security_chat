@@ -83,10 +83,8 @@ class _ChatViewScreenState extends State<ChatViewScreen> {
   }
 
   Future<void> _loadMembers() async {
-    final members =
-        await Api.instance.getList('/chats/${widget.chatId}/members');
+    final members = await Api.instance.getList('/chats/${widget.chatId}/members');
     final usernamesById = <int, String>{};
-
     for (final raw in members.cast<Map<String, dynamic>>()) {
       final id = raw['id'];
       final username = raw['username']?.toString();
@@ -94,14 +92,12 @@ class _ChatViewScreenState extends State<ChatViewScreen> {
         usernamesById[id] = username;
       }
     }
-
     _members = members.cast<Map<String, dynamic>>();
     _usernamesById = usernamesById;
   }
 
   void _scrollToBottom({bool animated = true}) {
     if (!_scrollController.hasClients) return;
-
     final target = _scrollController.position.maxScrollExtent + 80;
 
     if (animated) {
@@ -131,8 +127,7 @@ class _ChatViewScreenState extends State<ChatViewScreen> {
       await _ensureChatKey();
       await _loadMembers();
 
-      final res =
-          await Api.instance.getList('/chats/${widget.chatId}/messages?limit=100');
+      final res = await Api.instance.getList('/chats/${widget.chatId}/messages?limit=100');
 
       final out = <Map<String, dynamic>>[];
 
@@ -164,7 +159,6 @@ class _ChatViewScreenState extends State<ChatViewScreen> {
       });
 
       if (!mounted) return;
-
       setState(() {
         messages = out;
         loading = false;
@@ -304,8 +298,7 @@ class _ChatViewScreenState extends State<ChatViewScreen> {
         builder: (dialogContext) {
           return AlertDialog(
             title: const Text('Запись голосового сообщения'),
-            content:
-                const Text('Идёт запись. Нажми «Стоп», чтобы отправить.'),
+            content: const Text('Идёт запись. Нажми «Стоп», чтобы отправить.'),
             actions: [
               TextButton(
                 onPressed: () async {
@@ -481,7 +474,6 @@ class _ChatViewScreenState extends State<ChatViewScreen> {
 
   String _chatSubtitle() {
     if (_members.isEmpty) return 'Защищённая переписка';
-
     if (_members.length == 2) {
       final other = _members.firstWhere(
         (m) => m['id'] != Session.instance.userId,
@@ -489,7 +481,6 @@ class _ChatViewScreenState extends State<ChatViewScreen> {
       );
       return other['username']?.toString() ?? 'Личный чат';
     }
-
     return '${_members.length} участников';
   }
 
@@ -519,34 +510,23 @@ class _ChatViewScreenState extends State<ChatViewScreen> {
       'ноября',
       'декабря',
     ];
-
     return '${date.day} ${months[date.month - 1]}';
   }
 
   bool _needsDateHeader(int index) {
     if (index == 0) return true;
-
-    final current =
-        MessageTile.parseMoscowDate(messages[index]['created_at']?.toString());
-    final previous = MessageTile.parseMoscowDate(
-      messages[index - 1]['created_at']?.toString(),
-    );
-
+    final current = MessageTile.parseMoscowDate(messages[index]['created_at']?.toString());
+    final previous = MessageTile.parseMoscowDate(messages[index - 1]['created_at']?.toString());
     if (current == null || previous == null) return false;
-
-    return current.year != previous.year ||
-        current.month != previous.month ||
-        current.day != previous.day;
+    return current.year != previous.year || current.month != previous.month || current.day != previous.day;
   }
 
   bool _shouldShowSender(int index) {
     final current = messages[index];
-
     if (current['sender_user_id'] == Session.instance.userId) return false;
     if (index == 0) return true;
-    if (_needsDateHeader(index)) return true;
-
     final previous = messages[index - 1];
+    if (_needsDateHeader(index)) return true;
     return previous['sender_user_id'] != current['sender_user_id'];
   }
 
@@ -612,38 +592,27 @@ class _ChatViewScreenState extends State<ChatViewScreen> {
                           controller: _scrollController,
                           padding: const EdgeInsets.fromLTRB(12, 12, 12, 18),
                           itemCount: messages.length,
-                          itemBuilder: (context, i) {
+                          itemBuilder: (c, i) {
                             final msg = messages[i];
                             final showDateHeader = _needsDateHeader(i);
-                            final senderName =
-                                msg['sender_username']?.toString() ??
-                                'Пользователь';
-                            final isMine =
-                                msg['sender_user_id'] == Session.instance.userId;
+                            final senderName = msg['sender_username']?.toString() ?? 'Пользователь';
+                            final isMine = msg['sender_user_id'] == Session.instance.userId;
                             final showSender = _shouldShowSender(i);
 
                             return Column(
                               children: [
                                 if (showDateHeader)
                                   Padding(
-                                    padding:
-                                        const EdgeInsets.symmetric(vertical: 10),
+                                    padding: const EdgeInsets.symmetric(vertical: 10),
                                     child: Container(
-                                      padding: const EdgeInsets.symmetric(
-                                        horizontal: 14,
-                                        vertical: 6,
-                                      ),
+                                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
                                       decoration: BoxDecoration(
                                         color: const Color(0xFFF2F4F7),
                                         borderRadius: BorderRadius.circular(999),
-                                        border: Border.all(
-                                          color: AppTheme.border,
-                                        ),
+                                        border: Border.all(color: AppTheme.border),
                                       ),
                                       child: Text(
-                                        _dateHeaderText(
-                                          msg['created_at']?.toString(),
-                                        ),
+                                        _dateHeaderText(msg['created_at']?.toString()),
                                         style: const TextStyle(
                                           fontSize: 12,
                                           fontWeight: FontWeight.w600,
@@ -684,9 +653,7 @@ class _ChatViewScreenState extends State<ChatViewScreen> {
                       IconButton(
                         tooltip: 'Голосовое сообщение',
                         icon: Icon(
-                          recording
-                              ? Icons.mic_rounded
-                              : Icons.mic_none_rounded,
+                          recording ? Icons.mic_rounded : Icons.mic_none_rounded,
                           color: recording ? Colors.red : null,
                         ),
                         onPressed: recording ? null : _sendVoice,

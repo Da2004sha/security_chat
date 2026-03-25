@@ -35,7 +35,6 @@ class MessageTile extends StatelessWidget {
             parsed.millisecond,
             parsed.microsecond,
           );
-
     return utc.add(const Duration(hours: 3));
   }
 
@@ -68,17 +67,15 @@ class MessageTile extends StatelessWidget {
     if (type == 'voice') {
       final durationMs = (message['duration_ms'] as num?)?.toInt() ?? 0;
       final seconds = (durationMs / 1000).round();
-      final durationLabel =
-          '${seconds ~/ 60}:${(seconds % 60).toString().padLeft(2, '0')}';
-
+      final durationLabel = '${seconds ~/ 60}:${(seconds % 60).toString().padLeft(2, '0')}';
       content = Row(
         mainAxisSize: MainAxisSize.min,
         children: [
           Container(
             width: 40,
             height: 40,
-            decoration: const BoxDecoration(
-              color: Color(0x1F2AABEE),
+            decoration: BoxDecoration(
+              color: const Color(0x1F2AABEE),
               shape: BoxShape.circle,
             ),
             child: const Icon(
@@ -98,10 +95,7 @@ class MessageTile extends StatelessWidget {
                 const SizedBox(height: 2),
                 Text(
                   durationLabel,
-                  style: const TextStyle(
-                    fontSize: 12,
-                    color: AppTheme.textSecondary,
-                  ),
+                  style: const TextStyle(fontSize: 12, color: AppTheme.textSecondary),
                 ),
               ],
             ),
@@ -110,7 +104,6 @@ class MessageTile extends StatelessWidget {
       );
     } else if (type == 'file') {
       final name = (message['name'] ?? 'Файл').toString();
-
       content = Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -148,11 +141,7 @@ class MessageTile extends StatelessWidget {
               child: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Icon(
-                    Icons.open_in_new_rounded,
-                    size: 18,
-                    color: AppTheme.primary,
-                  ),
+                  Icon(Icons.open_in_new_rounded, size: 18, color: AppTheme.primary),
                   SizedBox(width: 6),
                   Text(
                     'Открыть файл',
@@ -171,11 +160,7 @@ class MessageTile extends StatelessWidget {
       final text = (message['text'] ?? '').toString();
       content = Text(
         text,
-        style: const TextStyle(
-          fontSize: 16,
-          height: 1.35,
-          color: AppTheme.textPrimary,
-        ),
+        style: const TextStyle(fontSize: 16, height: 1.35, color: AppTheme.textPrimary),
       );
     }
 
