@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
+
 import 'screens/chats.dart';
 import 'screens/login.dart';
 import 'services/session.dart';
+import 'theme/app_theme.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -15,8 +17,9 @@ class App extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Secure Corp Chat',
-      theme: ThemeData(useMaterial3: true),
+      title: 'Защищённый чат',
+      debugShowCheckedModeBanner: false,
+      theme: AppTheme.light(),
       home: Session.instance.isAuthed
           ? const ChatsScreen()
           : const LoginScreen(),

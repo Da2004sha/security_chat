@@ -1,10 +1,12 @@
 import 'dart:math';
+
 import 'package:flutter/material.dart';
 
 import '../services/api.dart';
-import '../services/session.dart';
-import '../services/crypto_service.dart';
 import '../services/chat_key_service.dart';
+import '../services/crypto_service.dart';
+import '../services/session.dart';
+import '../theme/app_theme.dart';
 import 'chats.dart';
 
 class LoginScreen extends StatefulWidget {
@@ -43,37 +45,36 @@ class _LoginScreenState extends State<LoginScreen> {
     }
 
     final deviceName =
-        Session.instance.deviceName ?? "device-${Random().nextInt(9999)}";
+        Session.instance.deviceName ?? 'device-${Random().nextInt(9999)}';
 
-    final existingDevices =
-        await Api.instance.getList("/users/$myUserId/devices");
+    final existingDevices = await Api.instance.getList('/users/$myUserId/devices');
 
     Map<String, dynamic>? sameDevice;
     for (final d in existingDevices.cast<Map<String, dynamic>>()) {
-      if (d["pubkey_b64"] == pub) {
+      if (d['pubkey_b64'] == pub) {
         sameDevice = d;
         break;
       }
     }
 
     if (sameDevice != null) {
-      final existingId = sameDevice["id"] as int;
+      final existingId = sameDevice['id'] as int;
 
       await Session.instance.saveDevice(
         deviceId: existingId,
-        deviceName: sameDevice["device_name"] as String? ?? deviceName,
+        deviceName: sameDevice['device_name'] as String? ?? deviceName,
         xPriv: priv,
         xPub: pub,
       );
       return;
     }
 
-    final res = await Api.instance.post("/devices", {
-      "device_name": deviceName,
-      "pubkey_b64": pub,
+    final res = await Api.instance.post('/devices', {
+      'device_name': deviceName,
+      'pubkey_b64': pub,
     });
 
-    final id = res["id"] as int;
+    final id = res['id'] as int;
 
     await Session.instance.saveDevice(
       deviceId: id,
@@ -86,6 +87,8 @@ class _LoginScreenState extends State<LoginScreen> {
   Future<void> _submit() async {
     if (_busy) return;
 
+    FocusScope.of(context).unfocus();
+
     setState(() {
       _err = null;
       _busy = true;
@@ -96,25 +99,23 @@ class _LoginScreenState extends State<LoginScreen> {
       final password = _p.text;
 
       if (username.isEmpty || password.isEmpty) {
-        throw Exception("Введите логин и пароль");
+        throw Exception('Введите логин и пароль');
       }
 
-      final path = _isLogin ? "/auth/login" : "/auth/register";
+      final path = _isLogin ? '/auth/login' : '/auth/register';
 
       final res = await Api.instance.post(
         path,
-        {"username": username, "password": password},
+        {'username': username, 'password': password},
         auth: false,
       );
 
       await Session.instance.saveAuth(
-        token: res["access_token"],
-        userId: res["user_id"],
+        token: res['access_token'],
+        userId: res['user_id'],
       );
 
       await _ensureDeviceBoundToUser();
-
-      // подтягиваем chat keys, которые уже есть для этого устройства
       await ChatKeyService.instance.importMyChatKeys();
 
       if (!mounted) return;
@@ -122,7 +123,7 @@ class _LoginScreenState extends State<LoginScreen> {
         MaterialPageRoute(builder: (_) => const ChatsScreen()),
       );
     } catch (e) {
-      setState(() => _err = e.toString());
+      setState(() => _err = e.toString().replaceFirst('Exception: ', ''));
     } finally {
       if (mounted) {
         setState(() => _busy = false);
@@ -132,38 +133,140 @@ class _LoginScreenState extends State<LoginScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final title = _isLogin ? 'Вход' : 'Регистрация';
+    final buttonText = _isLogin ? 'Войти' : 'Зарегистрироваться';
+    final switchLead = _isLogin ? 'Нет аккаунта?' : 'Уже есть аккаунт?';
+    final switchAction = _isLogin ? 'Зарегистрироваться' : 'Войти';
+
     return Scaffold(
-      appBar: AppBar(title: const Text("Secure Corp Chat")),
-      body: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          children: [
-            TextField(
-              controller: _u,
-              decoration: const InputDecoration(labelText: "Username"),
-            ),
-            TextField(
-              controller: _p,
-              decoration: const InputDecoration(labelText: "Password"),
-              obscureText: true,
-            ),
-            const SizedBox(height: 12),
-            if (_err != null)
-              Text(_err!, style: const TextStyle(color: Colors.red)),
-            const SizedBox(height: 12),
-            FilledButton(
-              onPressed: _busy ? null : _submit,
-              child: Text(_busy ? "..." : (_isLogin ? "Login" : "Register")),
-            ),
-            TextButton(
-              onPressed: _busy
-                  ? null
-                  : () => setState(() => _isLogin = !_isLogin),
-              child: Text(
-                _isLogin ? "No account? Register" : "Have account? Login",
+      body: Container(
+        decoration: const BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+            colors: [Color(0xFFF7FAFD), Color(0xFFEFF4FA)],
+          ),
+        ),
+        child: SafeArea(
+          child: Center(
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.all(20),
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 430),
+                child: Card(
+                  child: Padding(
+                    padding: const EdgeInsets.all(24),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        Container(
+                          width: 72,
+                          height: 72,
+                          decoration: BoxDecoration(
+                            color: AppTheme.primary.withOpacity(0.12),
+                            shape: BoxShape.circle,
+                          ),
+                          child: const Icon(
+                            Icons.lock_rounded,
+                            size: 34,
+                            color: AppTheme.primary,
+                          ),
+                        ),
+                        const SizedBox(height: 20),
+                        const Text(
+                          'Защищённый чат',
+                          style: TextStyle(
+                            fontSize: 28,
+                            fontWeight: FontWeight.w800,
+                            color: AppTheme.textPrimary,
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        const Text(
+                          'Безопасный обмен сообщениями и файлами в корпоративной сети.',
+                          style: TextStyle(
+                            fontSize: 15,
+                            color: AppTheme.textSecondary,
+                            height: 1.4,
+                          ),
+                        ),
+                        const SizedBox(height: 28),
+                        Text(
+                          title,
+                          style: const TextStyle(
+                            fontSize: 22,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                        const SizedBox(height: 16),
+                        TextField(
+                          controller: _u,
+                          textInputAction: TextInputAction.next,
+                          decoration: const InputDecoration(
+                            labelText: 'Логин',
+                            hintText: 'Введите логин',
+                            prefixIcon: Icon(Icons.person_outline_rounded),
+                          ),
+                        ),
+                        const SizedBox(height: 14),
+                        TextField(
+                          controller: _p,
+                          obscureText: true,
+                          onSubmitted: (_) => _submit(),
+                          decoration: const InputDecoration(
+                            labelText: 'Пароль',
+                            hintText: 'Введите пароль',
+                            prefixIcon: Icon(Icons.lock_outline_rounded),
+                          ),
+                        ),
+                        if (_err != null) ...[
+                          const SizedBox(height: 14),
+                          Container(
+                            padding: const EdgeInsets.all(14),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFFFEECEC),
+                              borderRadius: BorderRadius.circular(16),
+                              border: Border.all(color: const Color(0xFFF7C9C9)),
+                            ),
+                            child: Text(
+                              _err!,
+                              style: const TextStyle(
+                                color: AppTheme.danger,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ),
+                        ],
+                        const SizedBox(height: 18),
+                        FilledButton(
+                          onPressed: _busy ? null : _submit,
+                          child: Text(_busy ? 'Подождите...' : buttonText),
+                        ),
+                        const SizedBox(height: 12),
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Text(
+                              switchLead,
+                              style: const TextStyle(
+                                color: AppTheme.textSecondary,
+                              ),
+                            ),
+                            TextButton(
+                              onPressed: _busy
+                                  ? null
+                                  : () => setState(() => _isLogin = !_isLogin),
+                              child: Text(switchAction),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
               ),
             ),
-          ],
+          ),
         ),
       ),
     );

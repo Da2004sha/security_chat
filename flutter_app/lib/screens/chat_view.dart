@@ -15,6 +15,7 @@ import '../services/chat_key_service.dart';
 import '../services/crypto_service.dart';
 import '../services/session.dart';
 import '../services/voice_recorder_service.dart';
+import '../theme/app_theme.dart';
 import '../widgets/message_tile.dart';
 
 class ChatViewScreen extends StatefulWidget {
@@ -33,6 +34,7 @@ class ChatViewScreen extends StatefulWidget {
 
 class _ChatViewScreenState extends State<ChatViewScreen> {
   final _text = TextEditingController();
+  final _scrollController = ScrollController();
 
   bool loading = true;
   bool _refreshing = false;
@@ -60,6 +62,7 @@ class _ChatViewScreenState extends State<ChatViewScreen> {
   void dispose() {
     _timer?.cancel();
     _text.dispose();
+    _scrollController.dispose();
     super.dispose();
   }
 
@@ -72,8 +75,23 @@ class _ChatViewScreenState extends State<ChatViewScreen> {
 
     if (_chatKey == null) {
       throw Exception(
-        "Нет ключа чата. Открой этот чат на устройстве, где сообщения уже видны, и подожди пару секунд.",
+        'Нет ключа чата. Открой этот чат на устройстве, где сообщения уже видны, и подожди пару секунд.',
       );
+    }
+  }
+
+  void _scrollToBottom({bool animated = true}) {
+    if (!_scrollController.hasClients) return;
+    final target = _scrollController.position.maxScrollExtent + 80;
+
+    if (animated) {
+      _scrollController.animateTo(
+        target,
+        duration: const Duration(milliseconds: 250),
+        curve: Curves.easeOut,
+      );
+    } else {
+      _scrollController.jumpTo(target);
     }
   }
 
@@ -93,32 +111,32 @@ class _ChatViewScreenState extends State<ChatViewScreen> {
       await _ensureChatKey();
 
       final res =
-          await Api.instance.getList("/chats/${widget.chatId}/messages?limit=100");
+          await Api.instance.getList('/chats/${widget.chatId}/messages?limit=100');
 
       final out = <Map<String, dynamic>>[];
 
       for (final m in res.cast<Map<String, dynamic>>()) {
         try {
           final plain = await CryptoService.instance.decryptJson(
-            payloadJson: m["payload_json"],
+            payloadJson: m['payload_json'],
             key: _chatKey!,
           );
 
           out.add({
-            "id": m["id"],
-            "sender_user_id": m["sender_user_id"],
-            "sender_device_id": m["sender_device_id"],
-            "created_at": m["created_at"],
+            'id': m['id'],
+            'sender_user_id': m['sender_user_id'],
+            'sender_device_id': m['sender_device_id'],
+            'created_at': m['created_at'],
             ...plain,
           });
         } catch (e) {
-          debugPrint("decrypt message failed id=${m["id"]}: $e");
+          debugPrint('decrypt message failed id=${m['id']}: $e');
         }
       }
 
       out.sort((a, b) {
-        final ai = (a["id"] as int?) ?? 0;
-        final bi = (b["id"] as int?) ?? 0;
+        final ai = (a['id'] as int?) ?? 0;
+        final bi = (b['id'] as int?) ?? 0;
         return ai.compareTo(bi);
       });
 
@@ -128,10 +146,14 @@ class _ChatViewScreenState extends State<ChatViewScreen> {
         loading = false;
         err = null;
       });
+
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _scrollToBottom(animated: silent);
+      });
     } catch (e) {
       if (!mounted) return;
       setState(() {
-        err = e.toString();
+        err = e.toString().replaceFirst('Exception: ', '');
         loading = false;
       });
     } finally {
@@ -150,24 +172,24 @@ class _ChatViewScreenState extends State<ChatViewScreen> {
 
       final payload = await CryptoService.instance.encryptJson(
         plaintext: {
-          "type": "text",
-          "text": text,
+          'type': 'text',
+          'text': text,
         },
         key: _chatKey!,
-        aad: "chat:${widget.chatId}",
+        aad: 'chat:${widget.chatId}',
       );
 
-      await Api.instance.post("/messages", {
-        "chat_id": widget.chatId,
-        "payload_json": payload,
-        "sender_device_id": Session.instance.deviceId,
+      await Api.instance.post('/messages', {
+        'chat_id': widget.chatId,
+        'payload_json': payload,
+        'sender_device_id': Session.instance.deviceId,
       });
 
       await ChatKeyService.instance.syncChatKeyForChat(widget.chatId);
       await _loadHistory(silent: true);
     } catch (e) {
       if (!mounted) return;
-      setState(() => err = e.toString());
+      setState(() => err = e.toString().replaceFirst('Exception: ', ''));
     }
   }
 
@@ -187,18 +209,17 @@ class _ChatViewScreenState extends State<ChatViewScreen> {
       final encryptedFile = await CryptoService.instance.encryptBytes(
         plaintext: Uint8List.fromList(file.bytes!),
         key: fileKey,
-        aad: "file:chat:${widget.chatId}",
+        aad: 'file:chat:${widget.chatId}',
       );
 
-      final req =
-          http.MultipartRequest("POST", Api.instance.uri("/attachments"));
+      final req = http.MultipartRequest('POST', Api.instance.uri('/attachments'));
       req.headers.addAll(Session.instance.authHeaders());
 
       req.files.add(
         http.MultipartFile.fromBytes(
-          "file",
+          'file',
           encryptedFile,
-          filename: "${file.name}.e2ee",
+          filename: '${file.name}.e2ee',
         ),
       );
 
@@ -213,26 +234,26 @@ class _ChatViewScreenState extends State<ChatViewScreen> {
 
       final payload = await CryptoService.instance.encryptJson(
         plaintext: {
-          "type": "file",
-          "attachment_id": att["attachment_id"],
-          "name": file.name,
-          "file_key_b64": fileKeyB64,
+          'type': 'file',
+          'attachment_id': att['attachment_id'],
+          'name': file.name,
+          'file_key_b64': fileKeyB64,
         },
         key: _chatKey!,
-        aad: "chat:${widget.chatId}",
+        aad: 'chat:${widget.chatId}',
       );
 
-      await Api.instance.post("/messages", {
-        "chat_id": widget.chatId,
-        "payload_json": payload,
-        "sender_device_id": Session.instance.deviceId,
+      await Api.instance.post('/messages', {
+        'chat_id': widget.chatId,
+        'payload_json': payload,
+        'sender_device_id': Session.instance.deviceId,
       });
 
       await ChatKeyService.instance.syncChatKeyForChat(widget.chatId);
       await _loadHistory(silent: true);
     } catch (e) {
       if (!mounted) return;
-      setState(() => err = e.toString());
+      setState(() => err = e.toString().replaceFirst('Exception: ', ''));
     }
   }
 
@@ -258,8 +279,8 @@ class _ChatViewScreenState extends State<ChatViewScreen> {
         barrierDismissible: false,
         builder: (dialogContext) {
           return AlertDialog(
-            title: const Text("Запись голосового"),
-            content: const Text("Идёт запись..."),
+            title: const Text('Запись голосового сообщения'),
+            content: const Text('Идёт запись. Нажми «Стоп», чтобы отправить.'),
             actions: [
               TextButton(
                 onPressed: () async {
@@ -269,13 +290,13 @@ class _ChatViewScreenState extends State<ChatViewScreen> {
                     Navigator.pop(dialogContext);
                   }
                 },
-                child: const Text("Отмена"),
+                child: const Text('Отмена'),
               ),
               FilledButton(
                 onPressed: () {
                   Navigator.pop(dialogContext);
                 },
-                child: const Text("Стоп"),
+                child: const Text('Стоп'),
               ),
             ],
           );
@@ -294,18 +315,17 @@ class _ChatViewScreenState extends State<ChatViewScreen> {
       final encryptedFile = await CryptoService.instance.encryptBytes(
         plaintext: bytes,
         key: fileKey,
-        aad: "voice:chat:${widget.chatId}",
+        aad: 'voice:chat:${widget.chatId}',
       );
 
-      final req =
-          http.MultipartRequest("POST", Api.instance.uri("/attachments"));
+      final req = http.MultipartRequest('POST', Api.instance.uri('/attachments'));
       req.headers.addAll(Session.instance.authHeaders());
 
       req.files.add(
         http.MultipartFile.fromBytes(
-          "file",
+          'file',
           encryptedFile,
-          filename: "voice_${DateTime.now().millisecondsSinceEpoch}.m4a.e2ee",
+          filename: 'voice_${DateTime.now().millisecondsSinceEpoch}.m4a.e2ee',
         ),
       );
 
@@ -320,20 +340,20 @@ class _ChatViewScreenState extends State<ChatViewScreen> {
 
       final payload = await CryptoService.instance.encryptJson(
         plaintext: {
-          "type": "voice",
-          "attachment_id": att["attachment_id"],
-          "file_key_b64": base64Encode(fileKey),
-          "duration_ms": result.durationMs,
-          "ext": "m4a",
+          'type': 'voice',
+          'attachment_id': att['attachment_id'],
+          'file_key_b64': base64Encode(fileKey),
+          'duration_ms': result.durationMs,
+          'ext': 'm4a',
         },
         key: _chatKey!,
-        aad: "chat:${widget.chatId}",
+        aad: 'chat:${widget.chatId}',
       );
 
-      await Api.instance.post("/messages", {
-        "chat_id": widget.chatId,
-        "payload_json": payload,
-        "sender_device_id": Session.instance.deviceId,
+      await Api.instance.post('/messages', {
+        'chat_id': widget.chatId,
+        'payload_json': payload,
+        'sender_device_id': Session.instance.deviceId,
       });
 
       try {
@@ -346,7 +366,7 @@ class _ChatViewScreenState extends State<ChatViewScreen> {
       await _loadHistory(silent: true);
     } catch (e) {
       if (!mounted) return;
-      setState(() => err = e.toString());
+      setState(() => err = e.toString().replaceFirst('Exception: ', ''));
     } finally {
       if (mounted) {
         setState(() {
@@ -358,16 +378,16 @@ class _ChatViewScreenState extends State<ChatViewScreen> {
 
   Future<void> _openFile(Map<String, dynamic> msg) async {
     try {
-      final id = msg["attachment_id"];
-      final fileKey = base64Decode(msg["file_key_b64"]);
+      final id = msg['attachment_id'];
+      final fileKey = base64Decode(msg['file_key_b64']);
 
       final response = await http.get(
-        Api.instance.uri("/attachments/$id"),
+        Api.instance.uri('/attachments/$id'),
         headers: Session.instance.authHeaders(),
       );
 
       if (response.statusCode >= 400) {
-        throw Exception("${response.statusCode}: ${response.body}");
+        throw Exception('${response.statusCode}: ${response.body}');
       }
 
       final plain = await CryptoService.instance.decryptBytes(
@@ -376,30 +396,30 @@ class _ChatViewScreenState extends State<ChatViewScreen> {
       );
 
       final dir = await getTemporaryDirectory();
-      final path = "${dir.path}/${msg["name"]}";
+      final path = '${dir.path}/${msg['name']}';
       final file = File(path);
       await file.writeAsBytes(plain);
 
       await OpenFilex.open(path);
     } catch (e) {
       if (!mounted) return;
-      setState(() => err = e.toString());
+      setState(() => err = e.toString().replaceFirst('Exception: ', ''));
     }
   }
 
   Future<void> _openVoice(Map<String, dynamic> msg) async {
     try {
-      final id = msg["attachment_id"];
-      final fileKey = base64Decode(msg["file_key_b64"]);
-      final ext = (msg["ext"] ?? "m4a").toString();
+      final id = msg['attachment_id'];
+      final fileKey = base64Decode(msg['file_key_b64']);
+      final ext = (msg['ext'] ?? 'm4a').toString();
 
       final response = await http.get(
-        Api.instance.uri("/attachments/$id"),
+        Api.instance.uri('/attachments/$id'),
         headers: Session.instance.authHeaders(),
       );
 
       if (response.statusCode >= 400) {
-        throw Exception("${response.statusCode}: ${response.body}");
+        throw Exception('${response.statusCode}: ${response.body}');
       }
 
       final plain = await CryptoService.instance.decryptBytes(
@@ -408,26 +428,26 @@ class _ChatViewScreenState extends State<ChatViewScreen> {
       );
 
       final dir = await getTemporaryDirectory();
-      final path = "${dir.path}/voice_$id.$ext";
+      final path = '${dir.path}/voice_$id.$ext';
       final file = File(path);
       await file.writeAsBytes(plain);
 
       await OpenFilex.open(path);
     } catch (e) {
       if (!mounted) return;
-      setState(() => err = e.toString());
+      setState(() => err = e.toString().replaceFirst('Exception: ', ''));
     }
   }
 
   Future<void> _handleOpenAttachment(Map<String, dynamic> msg) async {
-    final type = (msg["type"] ?? "").toString();
+    final type = (msg['type'] ?? '').toString();
 
-    if (type == "file") {
+    if (type == 'file') {
       await _openFile(msg);
       return;
     }
 
-    if (type == "voice") {
+    if (type == 'voice') {
       await _openVoice(msg);
       return;
     }
@@ -441,40 +461,68 @@ class _ChatViewScreenState extends State<ChatViewScreen> {
         children: [
           if (err != null)
             Padding(
-              padding: const EdgeInsets.all(8),
-              child: Text(
-                err!,
-                style: const TextStyle(color: Colors.red),
+              padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+              child: Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(14),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFFEECEC),
+                  borderRadius: BorderRadius.circular(16),
+                ),
+                child: Text(
+                  err!,
+                  style: const TextStyle(
+                    color: AppTheme.danger,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
               ),
             ),
           Expanded(
             child: loading
                 ? const Center(child: CircularProgressIndicator())
                 : messages.isEmpty
-                    ? const Center(child: Text("Сообщений пока нет"))
+                    ? const Center(
+                        child: Text(
+                          'Сообщений пока нет',
+                          style: TextStyle(
+                            color: AppTheme.textSecondary,
+                            fontSize: 16,
+                          ),
+                        ),
+                      )
                     : ListView.builder(
-                        padding: const EdgeInsets.symmetric(vertical: 8),
+                        controller: _scrollController,
+                        padding: const EdgeInsets.fromLTRB(12, 12, 12, 18),
                         itemCount: messages.length,
                         itemBuilder: (c, i) => MessageTile(
                           message: messages[i],
+                          myUserId: Session.instance.userId,
                           onOpenFile: _handleOpenAttachment,
                         ),
                       ),
           ),
           SafeArea(
             top: false,
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(8, 6, 8, 8),
+            child: Container(
+              padding: const EdgeInsets.fromLTRB(10, 8, 10, 10),
+              decoration: const BoxDecoration(
+                color: Colors.white,
+                border: Border(top: BorderSide(color: AppTheme.border)),
+              ),
               child: Row(
+                crossAxisAlignment: CrossAxisAlignment.end,
                 children: [
                   IconButton(
-                    icon: const Icon(Icons.attach_file),
+                    tooltip: 'Прикрепить файл',
+                    icon: const Icon(Icons.attach_file_rounded),
                     onPressed: _sendFile,
                   ),
                   if (_canRecordVoice)
                     IconButton(
+                      tooltip: 'Голосовое сообщение',
                       icon: Icon(
-                        recording ? Icons.mic : Icons.mic_none,
+                        recording ? Icons.mic_rounded : Icons.mic_none_rounded,
                         color: recording ? Colors.red : null,
                       ),
                       onPressed: recording ? null : _sendVoice,
@@ -484,17 +532,23 @@ class _ChatViewScreenState extends State<ChatViewScreen> {
                       controller: _text,
                       minLines: 1,
                       maxLines: 4,
+                      textInputAction: TextInputAction.send,
+                      onSubmitted: (_) => _sendText(),
                       decoration: const InputDecoration(
-                        hintText: "Message",
-                        border: OutlineInputBorder(),
+                        hintText: 'Сообщение',
                         isDense: true,
                       ),
                     ),
                   ),
                   const SizedBox(width: 6),
-                  IconButton(
-                    icon: const Icon(Icons.send),
+                  FilledButton(
                     onPressed: _sendText,
+                    style: FilledButton.styleFrom(
+                      minimumSize: const Size(52, 52),
+                      padding: EdgeInsets.zero,
+                      shape: const CircleBorder(),
+                    ),
+                    child: const Icon(Icons.send_rounded),
                   ),
                 ],
               ),
