@@ -189,6 +189,53 @@ def list_my_chats(
     return [ChatOut(id=c.id, is_group=c.is_group, title=c.title) for c in chats]
 
 
+@app.delete("/chats/{chat_id}")
+def delete_chat(
+    chat_id: int,
+    me: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    is_member = db.scalar(
+        select(ChatMember).where(
+            ChatMember.chat_id == chat_id,
+            ChatMember.user_id == me.id,
+        )
+    )
+    if not is_member:
+        raise HTTPException(403, "Not a member")
+
+    chat = db.get(Chat, chat_id)
+    if not chat:
+        raise HTTPException(404, "Chat not found")
+
+    # Удаляем связанные сообщения
+    messages = db.scalars(
+        select(Message).where(Message.chat_id == chat_id)
+    ).all()
+    for msg in messages:
+        db.delete(msg)
+
+    # Удаляем ключи чата
+    chat_keys = db.scalars(
+        select(ChatKey).where(ChatKey.chat_id == chat_id)
+    ).all()
+    for key in chat_keys:
+        db.delete(key)
+
+    # Удаляем участников
+    members = db.scalars(
+        select(ChatMember).where(ChatMember.chat_id == chat_id)
+    ).all()
+    for member in members:
+        db.delete(member)
+
+    # Удаляем сам чат
+    db.delete(chat)
+    db.commit()
+
+    return {"status": "deleted", "chat_id": chat_id}
+
+
 @app.get("/chats/{chat_id}/members", response_model=list[UserOut])
 def list_chat_members(
     chat_id: int,
@@ -218,7 +265,6 @@ def upsert_chat_key(
     me: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    # отправитель должен быть участником чата
     is_member = db.scalar(
         select(ChatMember).where(
             ChatMember.chat_id == data.chat_id,
@@ -276,18 +322,18 @@ def get_my_chat_keys(
 
     out: list[ChatKeyOut] = []
     for k in keys:
-      wrapped_by = db.get(Device, k.wrapped_by_device_id)
-      if wrapped_by is None:
-          continue
-      out.append(
-          ChatKeyOut(
-              chat_id=k.chat_id,
-              device_id=k.device_id,
-              wrapped_by_device_id=k.wrapped_by_device_id,
-              wrapped_key_json=k.wrapped_key_json,
-              wrapped_by_pubkey_b64=wrapped_by.pubkey_b64,
-          )
-      )
+        wrapped_by = db.get(Device, k.wrapped_by_device_id)
+        if wrapped_by is None:
+            continue
+        out.append(
+            ChatKeyOut(
+                chat_id=k.chat_id,
+                device_id=k.device_id,
+                wrapped_by_device_id=k.wrapped_by_device_id,
+                wrapped_key_json=k.wrapped_key_json,
+                wrapped_by_pubkey_b64=wrapped_by.pubkey_b64,
+            )
+        )
     return out
 
 

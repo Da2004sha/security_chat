@@ -95,7 +95,9 @@ class _ChatsScreenState extends State<ChatsScreen> {
 
     final members = _membersByChat[chat['id'] as int? ?? -1] ?? const [];
     if (chat['is_group'] == true) {
-      return members.isEmpty ? 'Групповой чат' : members.map((e) => e['username']).join(', ');
+      return members.isEmpty
+          ? 'Групповой чат'
+          : members.map((e) => e['username']).join(', ');
     }
 
     for (final member in members) {
@@ -126,6 +128,95 @@ class _ChatsScreenState extends State<ChatsScreen> {
     );
 
     await _load();
+  }
+
+  Future<void> _deleteChat(Map<String, dynamic> chat) async {
+    final title = _chatTitle(chat);
+    final chatId = chat['id'] as int;
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: const Text('Удалить чат'),
+          content: Text(
+            'Чат "$title" будет удалён полностью у всех участников. Продолжить?',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Отмена'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(context, true),
+              style: FilledButton.styleFrom(
+                backgroundColor: AppTheme.danger,
+              ),
+              child: const Text('Удалить'),
+            ),
+          ],
+        );
+      },
+    );
+
+    if (confirmed != true) return;
+
+    try {
+      await Api.instance.delete('/chats/$chatId');
+
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Чат удалён')),
+      );
+
+      await _load();
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        err = e.toString().replaceFirst('Exception: ', '');
+      });
+    }
+  }
+
+  Future<void> _showChatMenu(Map<String, dynamic> chat) async {
+    final result = await showModalBottomSheet<String>(
+      context: context,
+      showDragHandle: true,
+      builder: (context) {
+        return SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(8, 4, 8, 12),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                ListTile(
+                  leading: const Icon(Icons.chat_bubble_outline_rounded),
+                  title: const Text('Открыть чат'),
+                  onTap: () => Navigator.pop(context, 'open'),
+                ),
+                ListTile(
+                  leading: const Icon(
+                    Icons.delete_outline_rounded,
+                    color: AppTheme.danger,
+                  ),
+                  title: const Text(
+                    'Удалить чат',
+                    style: TextStyle(color: AppTheme.danger),
+                  ),
+                  onTap: () => Navigator.pop(context, 'delete'),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+
+    if (result == 'open') {
+      await _openChat(chat);
+    } else if (result == 'delete') {
+      await _deleteChat(chat);
+    }
   }
 
   List<Map<String, dynamic>> get _filteredChats {
@@ -241,31 +332,44 @@ class _ChatsScreenState extends State<ChatsScreen> {
                             final isGroup = chat['is_group'] == true;
                             final title = _chatTitle(chat);
                             final subtitle = _chatSubtitle(chat);
-                            final avatarText = title.isNotEmpty ? title.characters.first.toUpperCase() : '#';
+                            final avatarText = title.isNotEmpty
+                                ? title.characters.first.toUpperCase()
+                                : '#';
 
                             return Card(
                               child: InkWell(
                                 borderRadius: BorderRadius.circular(24),
                                 onTap: () => _openChat(chat),
+                                onLongPress: () => _showChatMenu(chat),
                                 child: Padding(
-                                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 16,
+                                    vertical: 14,
+                                  ),
                                   child: Row(
                                     children: [
                                       CircleAvatar(
                                         radius: 26,
-                                        backgroundColor: isGroup ? const Color(0x1F2AABEE) : const Color(0xFFE8F5E9),
-                                        foregroundColor: isGroup ? AppTheme.primaryDark : const Color(0xFF2E7D32),
+                                        backgroundColor: isGroup
+                                            ? const Color(0x1F2AABEE)
+                                            : const Color(0xFFE8F5E9),
+                                        foregroundColor: isGroup
+                                            ? AppTheme.primaryDark
+                                            : const Color(0xFF2E7D32),
                                         child: isGroup
                                             ? const Icon(Icons.groups_rounded)
                                             : Text(
                                                 avatarText,
-                                                style: const TextStyle(fontWeight: FontWeight.w800),
+                                                style: const TextStyle(
+                                                  fontWeight: FontWeight.w800,
+                                                ),
                                               ),
                                       ),
                                       const SizedBox(width: 14),
                                       Expanded(
                                         child: Column(
-                                          crossAxisAlignment: CrossAxisAlignment.start,
+                                          crossAxisAlignment:
+                                              CrossAxisAlignment.start,
                                           children: [
                                             Text(
                                               title,
@@ -289,8 +393,30 @@ class _ChatsScreenState extends State<ChatsScreen> {
                                           ],
                                         ),
                                       ),
-                                      const SizedBox(width: 8),
-                                      const Icon(Icons.chevron_right_rounded, color: AppTheme.textSecondary),
+                                      PopupMenuButton<String>(
+                                        tooltip: 'Действия',
+                                        onSelected: (value) async {
+                                          if (value == 'open') {
+                                            await _openChat(chat);
+                                          } else if (value == 'delete') {
+                                            await _deleteChat(chat);
+                                          }
+                                        },
+                                        itemBuilder: (context) => const [
+                                          PopupMenuItem(
+                                            value: 'open',
+                                            child: Text('Открыть'),
+                                          ),
+                                          PopupMenuItem(
+                                            value: 'delete',
+                                            child: Text('Удалить чат'),
+                                          ),
+                                        ],
+                                        icon: const Icon(
+                                          Icons.more_vert_rounded,
+                                          color: AppTheme.textSecondary,
+                                        ),
+                                      ),
                                     ],
                                   ),
                                 ),

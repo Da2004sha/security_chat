@@ -47,6 +47,7 @@ class _ChatViewScreenState extends State<ChatViewScreen> {
   List<Map<String, dynamic>> _members = [];
 
   Timer? _timer;
+  bool _shouldScrollAfterBuild = false;
 
   bool get _canRecordVoice => VoiceRecorderService.instance.canRecord;
 
@@ -99,6 +100,12 @@ class _ChatViewScreenState extends State<ChatViewScreen> {
     _usernamesById = usernamesById;
   }
 
+  bool _isNearBottom() {
+    if (!_scrollController.hasClients) return true;
+    final position = _scrollController.position;
+    return (position.maxScrollExtent - position.pixels) < 120;
+  }
+
   void _scrollToBottom({bool animated = true}) {
     if (!_scrollController.hasClients) return;
 
@@ -107,12 +114,35 @@ class _ChatViewScreenState extends State<ChatViewScreen> {
     if (animated) {
       _scrollController.animateTo(
         target,
-        duration: const Duration(milliseconds: 250),
+        duration: const Duration(milliseconds: 220),
         curve: Curves.easeOut,
       );
     } else {
       _scrollController.jumpTo(target);
     }
+  }
+
+  bool _sameMessages(
+    List<Map<String, dynamic>> a,
+    List<Map<String, dynamic>> b,
+  ) {
+    if (a.length != b.length) return false;
+
+    for (var i = 0; i < a.length; i++) {
+      final aMsg = a[i];
+      final bMsg = b[i];
+
+      if (aMsg['id'] != bMsg['id']) return false;
+      if (aMsg['created_at'] != bMsg['created_at']) return false;
+      if (aMsg['text'] != bMsg['text']) return false;
+      if (aMsg['type'] != bMsg['type']) return false;
+      if (aMsg['sender_user_id'] != bMsg['sender_user_id']) return false;
+      if (aMsg['attachment_id'] != bMsg['attachment_id']) return false;
+      if (aMsg['name'] != bMsg['name']) return false;
+      if (aMsg['duration_ms'] != bMsg['duration_ms']) return false;
+    }
+
+    return true;
   }
 
   Future<void> _loadHistory({bool silent = false}) async {
@@ -165,15 +195,39 @@ class _ChatViewScreenState extends State<ChatViewScreen> {
 
       if (!mounted) return;
 
+      final hadMessages = messages.isNotEmpty;
+      final oldLastId = hadMessages ? messages.last['id'] : null;
+      final newLastId = out.isNotEmpty ? out.last['id'] : null;
+      final changed = !_sameMessages(messages, out);
+      final nearBottom = _isNearBottom();
+
+      if (!changed) {
+        if (!silent) {
+          setState(() {
+            loading = false;
+            err = null;
+          });
+        }
+        return;
+      }
+
+      final shouldAutoScroll =
+          !hadMessages || oldLastId != newLastId ? nearBottom || !silent : false;
+
       setState(() {
         messages = out;
         loading = false;
         err = null;
+        _shouldScrollAfterBuild = shouldAutoScroll;
       });
 
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        _scrollToBottom(animated: silent);
-      });
+      if (_shouldScrollAfterBuild) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (!mounted) return;
+          _scrollToBottom(animated: silent);
+          _shouldScrollAfterBuild = false;
+        });
+      }
     } catch (e) {
       if (!mounted) return;
       setState(() {
@@ -209,6 +263,7 @@ class _ChatViewScreenState extends State<ChatViewScreen> {
         'sender_device_id': Session.instance.deviceId,
       });
 
+      _shouldScrollAfterBuild = true;
       await ChatKeyService.instance.syncChatKeyForChat(widget.chatId);
       await _loadHistory(silent: true);
     } catch (e) {
@@ -273,6 +328,7 @@ class _ChatViewScreenState extends State<ChatViewScreen> {
         'sender_device_id': Session.instance.deviceId,
       });
 
+      _shouldScrollAfterBuild = true;
       await ChatKeyService.instance.syncChatKeyForChat(widget.chatId);
       await _loadHistory(silent: true);
     } catch (e) {
@@ -388,6 +444,7 @@ class _ChatViewScreenState extends State<ChatViewScreen> {
         }
       } catch (_) {}
 
+      _shouldScrollAfterBuild = true;
       await ChatKeyService.instance.syncChatKeyForChat(widget.chatId);
       await _loadHistory(silent: true);
     } catch (e) {
@@ -626,8 +683,7 @@ class _ChatViewScreenState extends State<ChatViewScreen> {
                               children: [
                                 if (showDateHeader)
                                   Padding(
-                                    padding:
-                                        const EdgeInsets.symmetric(vertical: 10),
+                                    padding: const EdgeInsets.symmetric(vertical: 10),
                                     child: Container(
                                       padding: const EdgeInsets.symmetric(
                                         horizontal: 14,
