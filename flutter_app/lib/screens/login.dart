@@ -36,12 +36,21 @@ class _LoginScreenState extends State<LoginScreen> {
 
     String? priv = Session.instance.x25519PrivateKeyB64;
     String? pub = Session.instance.x25519PublicKeyB64;
+    String? edPriv = Session.instance.ed25519PrivateKeyB64;
+    String? edPub = Session.instance.ed25519PublicKeyB64;
 
     if (priv == null || priv.isEmpty || pub == null || pub.isEmpty) {
       final (newPriv, newPub) =
           await CryptoService.instance.generateDeviceKeypair();
       priv = newPriv;
       pub = newPub;
+    }
+
+    if (edPriv == null || edPriv.isEmpty || edPub == null || edPub.isEmpty) {
+      final (newEdPriv, newEdPub) =
+          await CryptoService.instance.generateSigningKeypair();
+      edPriv = newEdPriv;
+      edPub = newEdPub;
     }
 
     final deviceName =
@@ -65,13 +74,23 @@ class _LoginScreenState extends State<LoginScreen> {
         deviceName: sameDevice['device_name'] as String? ?? deviceName,
         xPriv: priv,
         xPub: pub,
+        edPriv: edPriv,
+        edPub: edPub,
       );
+      if ((sameDevice['sign_pubkey_b64']?.toString() ?? '') != edPub) {
+        await Api.instance.post('/devices', {
+          'device_name': sameDevice['device_name'] as String? ?? deviceName,
+          'pubkey_b64': pub,
+          'sign_pubkey_b64': edPub,
+        });
+      }
       return;
     }
 
     final res = await Api.instance.post('/devices', {
       'device_name': deviceName,
       'pubkey_b64': pub,
+      'sign_pubkey_b64': edPub,
     });
 
     final id = res['id'] as int;
@@ -81,6 +100,8 @@ class _LoginScreenState extends State<LoginScreen> {
       deviceName: deviceName,
       xPriv: priv,
       xPub: pub,
+      edPriv: edPriv,
+      edPub: edPub,
     );
   }
 

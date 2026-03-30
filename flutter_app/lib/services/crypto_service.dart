@@ -2,31 +2,29 @@ import 'dart:convert';
 import 'dart:math';
 import 'dart:typed_data';
 
-
 import 'package:cryptography/cryptography.dart';
 
 class CryptoService {
-  Uint8List randomBytes(int length) {
-  final bytes = Uint8List(length);
-  final r = Random.secure();
-  for (int i = 0; i < length; i++) {
-    bytes[i] = r.nextInt(256);
-  }
-  return bytes;
-}
   CryptoService._();
   static final CryptoService instance = CryptoService._();
 
   final _x25519 = X25519();
+  final _ed25519 = Ed25519();
   final _hkdf = Hkdf(
     hmac: Hmac.sha256(),
     outputLength: 32,
   );
-
-  // В cryptography самый совместимый AEAD — AES-GCM
   final _aead = AesGcm.with256bits();
 
-  /// Generates X25519 keypair and returns (privB64, pubB64)
+  Uint8List randomBytes(int length) {
+    final bytes = Uint8List(length);
+    final r = Random.secure();
+    for (int i = 0; i < length; i++) {
+      bytes[i] = r.nextInt(256);
+    }
+    return bytes;
+  }
+
   Future<(String, String)> generateDeviceKeypair() async {
     final kp = await _x25519.newKeyPair();
     final priv = await kp.extractPrivateKeyBytes();
@@ -34,14 +32,69 @@ class CryptoService {
     return (base64Encode(priv), base64Encode(pub));
   }
 
-  /// Derive symmetric chat key between me and peer (stable on all devices).
-  ///
-  /// IMPORTANT:
-  /// - myPrivB64 must be 32 bytes (X25519 private key bytes)
-  /// - myPubB64  must be 32 bytes
-  /// - theirPubB64 must be 32 bytes
-  ///
-  /// We make it stable by sorting (myPub, theirPub) and putting it into HKDF info.
+  Future<(String, String)> generateSigningKeypair() async {
+    final kp = await _ed25519.newKeyPair();
+    final priv = await kp.extractPrivateKeyBytes();
+    final pub = (await kp.extractPublicKey()).bytes;
+    return (base64Encode(priv), base64Encode(pub));
+  }
+
+  Future<String> signMessageEnvelope({
+    required String payloadJson,
+    required int chatId,
+    required int senderDeviceId,
+    required String privateKeyB64,
+  }) async {
+    final seed = base64Decode(privateKeyB64);
+    final keyPair = await _ed25519.newKeyPairFromSeed(seed);
+    final signature = await _ed25519.sign(
+      _messageEnvelopeBytes(
+        payloadJson: payloadJson,
+        chatId: chatId,
+        senderDeviceId: senderDeviceId,
+      ),
+      keyPair: keyPair,
+    );
+    return base64Encode(signature.bytes);
+  }
+
+  Future<bool> verifyMessageEnvelope({
+    required String payloadJson,
+    required int chatId,
+    required int senderDeviceId,
+    required String signatureB64,
+    required String publicKeyB64,
+  }) async {
+    try {
+      final signature = Signature(
+        base64Decode(signatureB64),
+        publicKey: SimplePublicKey(
+          base64Decode(publicKeyB64),
+          type: KeyPairType.ed25519,
+        ),
+      );
+      return _ed25519.verify(
+        _messageEnvelopeBytes(
+          payloadJson: payloadJson,
+          chatId: chatId,
+          senderDeviceId: senderDeviceId,
+        ),
+        signature: signature,
+      );
+    } catch (_) {
+      return false;
+    }
+  }
+
+  Uint8List _messageEnvelopeBytes({
+    required String payloadJson,
+    required int chatId,
+    required int senderDeviceId,
+  }) {
+    final body = 'secure_corp_chat:msg:v1|chat:$chatId|device:$senderDeviceId|payload:$payloadJson';
+    return Uint8List.fromList(utf8.encode(body));
+  }
+
   Future<Uint8List> deriveChatKey({
     required String myPrivB64,
     required String myPubB64,
@@ -52,19 +105,14 @@ class CryptoService {
     final theirPubBytes = base64Decode(theirPubB64);
 
     if (myPriv.length != 32) {
-      throw Exception("X25519 private key must be 32 bytes");
+      throw Exception('X25519 private key must be 32 bytes');
     }
     if (theirPubBytes.length != 32) {
-      throw Exception("X25519 public key must be 32 bytes");
+      throw Exception('X25519 public key must be 32 bytes');
     }
 
-    // Create key pair from seed (seed = private key bytes)
     final myKeyPair = await _x25519.newKeyPairFromSeed(myPriv);
-
-    final theirPub = SimplePublicKey(
-      theirPubBytes,
-      type: KeyPairType.x25519,
-    );
+    final theirPub = SimplePublicKey(theirPubBytes, type: KeyPairType.x25519);
 
     final shared = await _x25519.sharedSecretKey(
       keyPair: myKeyPair,
@@ -76,11 +124,11 @@ class CryptoService {
     final (pMin, pMax) = _lexicographicMinMax(myPubBytes, theirPubBytes);
 
     final info = Uint8List.fromList([
-      ...utf8.encode("secure_corp_chat:v2|"),
+      ...utf8.encode('secure_corp_chat:v2|'),
       ...utf8.encode(chatContext),
-      ...utf8.encode("|pubmin:"),
+      ...utf8.encode('|pubmin:'),
       ...pMin,
-      ...utf8.encode("|pubmax:"),
+      ...utf8.encode('|pubmax:'),
       ...pMax,
     ]);
 
@@ -94,7 +142,6 @@ class CryptoService {
     return Uint8List.fromList(keyBytes);
   }
 
-  /// Encrypt a JSON map and return BASE64 string (to store in DB as payload_json)
   Future<String> encryptJson({
     required Map<String, dynamic> plaintext,
     required Uint8List key,
@@ -109,7 +156,6 @@ class CryptoService {
     return base64Encode(packedBytes);
   }
 
-  /// Decrypt BASE64 payload_json -> Map
   Future<Map<String, dynamic>> decryptJson({
     required String payloadJson,
     required Uint8List key,
@@ -122,25 +168,16 @@ class CryptoService {
     return (jsonDecode(utf8.decode(plainBytes)) as Map).cast<String, dynamic>();
   }
 
-  /// Encrypt raw bytes into PACKED JSON bytes:
-  /// {
-  ///   "v":2,
-  ///   "algo":"aesgcm256",
-  ///   "nonce":b64,
-  ///   "ciphertext":b64,
-  ///   "mac":b64,
-  ///   "aad":"..."
-  /// }
   Future<Uint8List> encryptBytes({
     required Uint8List plaintext,
     required Uint8List key,
     required String aad,
   }) async {
     if (key.length != 32) {
-      throw Exception("AES-256 key must be 32 bytes");
+      throw Exception('AES-256 key must be 32 bytes');
     }
 
-    final nonce = _randomBytes(12); // AES-GCM nonce length = 12
+    final nonce = _randomBytes(12);
     final secretKey = SecretKey(key);
 
     final box = await _aead.encrypt(
@@ -151,12 +188,12 @@ class CryptoService {
     );
 
     final packed = <String, dynamic>{
-      "v": 2,
-      "algo": "aesgcm256",
-      "nonce": base64Encode(box.nonce),
-      "ciphertext": base64Encode(box.cipherText),
-      "mac": base64Encode(box.mac.bytes),
-      "aad": aad,
+      'v': 2,
+      'algo': 'aesgcm256',
+      'nonce': base64Encode(box.nonce),
+      'ciphertext': base64Encode(box.cipherText),
+      'mac': base64Encode(box.mac.bytes),
+      'aad': aad,
     };
 
     return Uint8List.fromList(utf8.encode(jsonEncode(packed)));
@@ -167,21 +204,21 @@ class CryptoService {
     required Uint8List key,
   }) async {
     if (key.length != 32) {
-      throw Exception("AES-256 key must be 32 bytes");
+      throw Exception('AES-256 key must be 32 bytes');
     }
 
     final packedStr = utf8.decode(packedJsonBytes);
     final packed = (jsonDecode(packedStr) as Map).cast<String, dynamic>();
 
-    final algo = packed["algo"] as String?;
-    if (algo != "aesgcm256") {
-      throw Exception("Unsupported algo: $algo");
+    final algo = packed['algo'] as String?;
+    if (algo != 'aesgcm256') {
+      throw Exception('Unsupported algo: $algo');
     }
 
-    final nonce = base64Decode(packed["nonce"] as String);
-    final cipher = base64Decode(packed["ciphertext"] as String);
-    final mac = Mac(base64Decode(packed["mac"] as String));
-    final aad = (packed["aad"] as String?) ?? "";
+    final nonce = base64Decode(packed['nonce'] as String);
+    final cipher = base64Decode(packed['ciphertext'] as String);
+    final mac = Mac(base64Decode(packed['mac'] as String));
+    final aad = (packed['aad'] as String?) ?? '';
 
     final box = SecretBox(cipher, nonce: nonce, mac: mac);
 

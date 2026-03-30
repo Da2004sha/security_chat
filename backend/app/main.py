@@ -1,4 +1,7 @@
+import asyncio
 import os
+from time import time
+
 from fastapi import (
     FastAPI,
     Depends,
@@ -7,10 +10,13 @@ from fastapi import (
     File,
     WebSocket,
     Query,
+    Form,
 )
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 from sqlalchemy import select
+from fastapi.responses import FileResponse
+from jose import jwt
 
 from .db import engine, Base, get_db
 from .models import User, Device, Chat, ChatMember, Message, Attachment, ChatKey
@@ -22,18 +28,29 @@ from .auth import (
     get_current_user,
 )
 from .config import UPLOAD_DIR, MAX_UPLOAD_MB, JWT_SECRET, JWT_ALG
-from jose import jwt
 from .realtime import manager
 
 app = FastAPI(title="Secure Corporate Chat Backend")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # dev only
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+def _ensure_chat_member(db: Session, chat_id: int, user_id: int):
+    member = db.scalar(
+        select(ChatMember).where(
+            ChatMember.chat_id == chat_id,
+            ChatMember.user_id == user_id,
+        )
+    )
+    if not member:
+        raise HTTPException(403, "Not a member")
+    return member
 
 
 @app.on_event("startup")
@@ -84,10 +101,15 @@ def add_device(
         )
     )
     if existing:
+        if getattr(existing, "sign_pubkey_b64", "") != data.sign_pubkey_b64:
+            existing.sign_pubkey_b64 = data.sign_pubkey_b64
+            db.commit()
+            db.refresh(existing)
         return DeviceOut(
             id=existing.id,
             device_name=existing.device_name,
             pubkey_b64=existing.pubkey_b64,
+            sign_pubkey_b64=existing.sign_pubkey_b64 or "",
             is_active=existing.is_active,
         )
 
@@ -95,6 +117,7 @@ def add_device(
         user_id=user.id,
         device_name=data.device_name,
         pubkey_b64=data.pubkey_b64,
+        sign_pubkey_b64=data.sign_pubkey_b64,
         is_active=True,
     )
     db.add(d)
@@ -105,6 +128,7 @@ def add_device(
         id=d.id,
         device_name=d.device_name,
         pubkey_b64=d.pubkey_b64,
+        sign_pubkey_b64=d.sign_pubkey_b64 or "",
         is_active=d.is_active,
     )
 
@@ -139,6 +163,7 @@ def list_user_devices(
             id=d.id,
             device_name=d.device_name,
             pubkey_b64=d.pubkey_b64,
+            sign_pubkey_b64=d.sign_pubkey_b64 or "",
             is_active=d.is_active,
         )
         for d in devices
@@ -195,41 +220,33 @@ def delete_chat(
     me: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    is_member = db.scalar(
-        select(ChatMember).where(
-            ChatMember.chat_id == chat_id,
-            ChatMember.user_id == me.id,
-        )
-    )
-    if not is_member:
-        raise HTTPException(403, "Not a member")
+    _ensure_chat_member(db, chat_id, me.id)
 
     chat = db.get(Chat, chat_id)
     if not chat:
         raise HTTPException(404, "Chat not found")
 
-    # Удаляем связанные сообщения
-    messages = db.scalars(
-        select(Message).where(Message.chat_id == chat_id)
-    ).all()
+    attachments = db.scalars(select(Attachment).where(Attachment.chat_id == chat_id)).all()
+    for att in attachments:
+        try:
+            if os.path.exists(att.path):
+                os.remove(att.path)
+        except OSError:
+            pass
+        db.delete(att)
+
+    messages = db.scalars(select(Message).where(Message.chat_id == chat_id)).all()
     for msg in messages:
         db.delete(msg)
 
-    # Удаляем ключи чата
-    chat_keys = db.scalars(
-        select(ChatKey).where(ChatKey.chat_id == chat_id)
-    ).all()
+    chat_keys = db.scalars(select(ChatKey).where(ChatKey.chat_id == chat_id)).all()
     for key in chat_keys:
         db.delete(key)
 
-    # Удаляем участников
-    members = db.scalars(
-        select(ChatMember).where(ChatMember.chat_id == chat_id)
-    ).all()
+    members = db.scalars(select(ChatMember).where(ChatMember.chat_id == chat_id)).all()
     for member in members:
         db.delete(member)
 
-    # Удаляем сам чат
     db.delete(chat)
     db.commit()
 
@@ -242,14 +259,7 @@ def list_chat_members(
     me: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    is_member = db.scalar(
-        select(ChatMember).where(
-            ChatMember.chat_id == chat_id,
-            ChatMember.user_id == me.id,
-        )
-    )
-    if not is_member:
-        raise HTTPException(403, "Not a member")
+    _ensure_chat_member(db, chat_id, me.id)
 
     user_ids = db.scalars(
         select(ChatMember.user_id).where(ChatMember.chat_id == chat_id)
@@ -265,14 +275,7 @@ def upsert_chat_key(
     me: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    is_member = db.scalar(
-        select(ChatMember).where(
-            ChatMember.chat_id == data.chat_id,
-            ChatMember.user_id == me.id,
-        )
-    )
-    if not is_member:
-        raise HTTPException(403, "Not a member")
+    _ensure_chat_member(db, data.chat_id, me.id)
 
     sender_device = db.get(Device, data.wrapped_by_device_id)
     if not sender_device or sender_device.user_id != me.id:
@@ -316,9 +319,7 @@ def get_my_chat_keys(
     if not my_device or my_device.user_id != me.id:
         raise HTTPException(400, "Invalid device")
 
-    keys = db.scalars(
-        select(ChatKey).where(ChatKey.device_id == device_id)
-    ).all()
+    keys = db.scalars(select(ChatKey).where(ChatKey.device_id == device_id)).all()
 
     out: list[ChatKeyOut] = []
     for k in keys:
@@ -343,19 +344,9 @@ def get_chat_key_devices(
     me: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    is_member = db.scalar(
-        select(ChatMember).where(
-            ChatMember.chat_id == chat_id,
-            ChatMember.user_id == me.id,
-        )
-    )
-    if not is_member:
-        raise HTTPException(403, "Not a member")
+    _ensure_chat_member(db, chat_id, me.id)
 
-    rows = db.scalars(
-        select(ChatKey).where(ChatKey.chat_id == chat_id)
-    ).all()
-
+    rows = db.scalars(select(ChatKey).where(ChatKey.chat_id == chat_id)).all()
     return [ChatKeyDeviceOut(device_id=r.device_id) for r in rows]
 
 
@@ -365,14 +356,7 @@ def send_message(
     me: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    is_member = db.scalar(
-        select(ChatMember).where(
-            ChatMember.chat_id == data.chat_id,
-            ChatMember.user_id == me.id,
-        )
-    )
-    if not is_member:
-        raise HTTPException(403, "Not a member")
+    _ensure_chat_member(db, data.chat_id, me.id)
 
     dev = db.get(Device, data.sender_device_id)
     if not dev or dev.user_id != me.id:
@@ -383,6 +367,8 @@ def send_message(
         sender_user_id=me.id,
         sender_device_id=data.sender_device_id,
         payload_json=data.payload_json,
+        signature_b64=data.signature_b64,
+        sig_alg=data.sig_alg,
     )
     db.add(msg)
     db.commit()
@@ -398,12 +384,13 @@ def send_message(
         sender_user_id=msg.sender_user_id,
         sender_device_id=msg.sender_device_id,
         payload_json=msg.payload_json,
+        signature_b64=msg.signature_b64,
+        sig_alg=msg.sig_alg,
         created_at=msg.created_at.isoformat(),
     )
 
     for uid in member_ids:
         try:
-            import asyncio
             asyncio.create_task(
                 manager.send_to_user(uid, {"type": "message", "data": out.model_dump()})
             )
@@ -420,14 +407,7 @@ def list_messages(
     me: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    is_member = db.scalar(
-        select(ChatMember).where(
-            ChatMember.chat_id == chat_id,
-            ChatMember.user_id == me.id,
-        )
-    )
-    if not is_member:
-        raise HTTPException(403, "Not a member")
+    _ensure_chat_member(db, chat_id, me.id)
 
     msgs = db.scalars(
         select(Message)
@@ -445,6 +425,8 @@ def list_messages(
             sender_user_id=m.sender_user_id,
             sender_device_id=m.sender_device_id,
             payload_json=m.payload_json,
+            signature_b64=m.signature_b64,
+            sig_alg=m.sig_alg,
             created_at=m.created_at.isoformat(),
         )
         for m in msgs
@@ -453,18 +435,20 @@ def list_messages(
 
 @app.post("/attachments", response_model=UploadOut)
 async def upload_attachment(
+    chat_id: int = Form(...),
     file: UploadFile = File(...),
     me: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
+    _ensure_chat_member(db, chat_id, me.id)
+
     max_bytes = MAX_UPLOAD_MB * 1024 * 1024
     data = await file.read()
-
     if len(data) > max_bytes:
         raise HTTPException(413, f"Max upload {MAX_UPLOAD_MB}MB")
 
-    safe_name = os.path.basename(file.filename or "file.bin")
-    disk_name = f"{me.id}_{int(__import__('time').time())}_{safe_name}"
+    safe_name = os.path.basename(file.filename or "blob.e2ee")
+    disk_name = f"chat{chat_id}_{me.id}_{int(time())}_{safe_name}"
     path = os.path.join(UPLOAD_DIR, disk_name)
 
     with open(path, "wb") as f:
@@ -472,6 +456,7 @@ async def upload_attachment(
 
     att = Attachment(
         owner_user_id=me.id,
+        chat_id=chat_id,
         filename=safe_name,
         content_type=file.content_type or "application/octet-stream",
         size_bytes=len(data),
@@ -499,7 +484,10 @@ def download_attachment(
     if not att:
         raise HTTPException(404, "Not found")
 
-    from fastapi.responses import FileResponse
+    _ensure_chat_member(db, att.chat_id, me.id)
+    if not os.path.exists(att.path):
+        raise HTTPException(404, "Attachment file not found")
+
     return FileResponse(att.path, media_type=att.content_type, filename=att.filename)
 
 
@@ -518,5 +506,3 @@ async def ws_endpoint(ws: WebSocket, token: str = Query(...)):
             await ws.receive_text()
     except Exception:
         pass
-    finally:
-        await manager.disconnect(user_id, ws)

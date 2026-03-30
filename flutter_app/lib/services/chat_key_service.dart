@@ -12,14 +12,6 @@ class ChatKeyService {
   ChatKeyService._();
   static final ChatKeyService instance = ChatKeyService._();
 
-  /// Импортирует chat keys, адресованные текущему устройству.
-  ///
-  /// ВАЖНО:
-  /// Раньше здесь был skip, если локальный ключ уже существовал.
-  /// Это ломало ситуацию после пересоздания чата / сброса БД, когда chatId
-  /// совпадал, а локальный ключ оставался старый.
-  ///
-  /// Теперь ключ с сервера считается источником истины и перезаписывает локальный.
   Future<void> importMyChatKeys() async {
     final deviceId = Session.instance.deviceId;
     if (deviceId == null) return;
@@ -47,9 +39,7 @@ class ChatKeyService {
         final chatKeyB64 = plain['chat_key_b64'] as String;
         final chatKey = Uint8List.fromList(base64Decode(chatKeyB64));
 
-        // Всегда перезаписываем локальный ключ значением с сервера.
         await Session.instance.saveChatKey(chatId, chatKey);
-
         debugPrint('importMyChatKeys: chat key imported for chat=$chatId');
       } catch (e) {
         debugPrint('importMyChatKeys failed for chat=$chatId: $e');
@@ -101,63 +91,66 @@ class ChatKeyService {
 
     for (final member in members) {
       final userId = member['id'] as int;
-      final devices = await Api.instance.getList('/users/$userId/devices');
 
-      for (final d in devices.cast<Map<String, dynamic>>()) {
-        final targetDeviceId = d['id'] as int;
-        final targetPub = d['pubkey_b64'] as String;
+      try {
+        final devices = await Api.instance
+            .getList('/users/$userId/devices')
+            .timeout(const Duration(seconds: 8));
 
-        if (existingDeviceIds.contains(targetDeviceId)) continue;
+        for (final d in devices.cast<Map<String, dynamic>>()) {
+          final targetDeviceId = d['id'] as int;
+          final targetPub = d['pubkey_b64'] as String;
 
-        try {
-          await publishChatKeyForDevice(
-            chatId: chatId,
-            chatKey: chatKey,
-            targetDeviceId: targetDeviceId,
-            targetPubB64: targetPub,
-          );
-        } catch (e) {
-          debugPrint(
-            'publishChatKeyToAllParticipants failed for chat=$chatId device=$targetDeviceId: $e',
-          );
+          if (existingDeviceIds.contains(targetDeviceId)) continue;
+
+          try {
+            await publishChatKeyForDevice(
+              chatId: chatId,
+              chatKey: chatKey,
+              targetDeviceId: targetDeviceId,
+              targetPubB64: targetPub,
+            ).timeout(const Duration(seconds: 8));
+          } catch (e) {
+            debugPrint(
+              'publishChatKeyToAllParticipants failed for chat=$chatId device=$targetDeviceId: $e',
+            );
+          }
         }
+      } catch (e) {
+        debugPrint(
+          'publishChatKeyToAllParticipants devices load failed for chat=$chatId user=$userId: $e',
+        );
       }
     }
   }
 
   Future<void> syncChatKeyForChat(int chatId) async {
-    final local = await Session.instance.getChatKey(chatId);
-
-    if (local != null) {
-      await publishChatKeyToAllParticipants(
-        chatId: chatId,
-        chatKey: local,
-      );
+    try {
+      await importMyChatKeys().timeout(const Duration(seconds: 8));
+    } catch (e) {
+      debugPrint('syncChatKeyForChat import failed for chat=$chatId: $e');
     }
-
-    // В любом случае импортируем с сервера ещё раз, чтобы получить
-    // актуальный ключ, если локальный устарел.
-    await importMyChatKeys();
   }
 
   Future<Uint8List?> ensureChatKey({
     required int chatId,
-    int retries = 6,
-    Duration delay = const Duration(milliseconds: 700),
+    int retries = 3,
+    Duration delay = const Duration(milliseconds: 500),
   }) async {
+    final local = await Session.instance.getChatKey(chatId);
+    if (local != null) {
+      return local;
+    }
+
     for (var i = 0; i < retries; i++) {
-      await importMyChatKeys();
+      try {
+        await importMyChatKeys().timeout(const Duration(seconds: 8));
+      } catch (e) {
+        debugPrint('ensureChatKey import failed for chat=$chatId: $e');
+      }
 
       final imported = await Session.instance.getChatKey(chatId);
       if (imported != null) {
-        try {
-          await publishChatKeyToAllParticipants(
-            chatId: chatId,
-            chatKey: imported,
-          );
-        } catch (e) {
-          debugPrint('ensureChatKey publish failed for chat=$chatId: $e');
-        }
         return imported;
       }
 

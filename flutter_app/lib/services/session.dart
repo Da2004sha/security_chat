@@ -16,15 +16,19 @@ class Session {
   String? deviceName;
   String? x25519PrivateKeyB64;
   String? x25519PublicKeyB64;
+  String? ed25519PrivateKeyB64;
+  String? ed25519PublicKeyB64;
 
-  static const _kToken = "token";
-  static const _kUserId = "userId";
-  static const _kDeviceId = "deviceId";
-  static const _kDeviceName = "deviceName";
-  static const _kXPriv = "xPriv";
-  static const _kXPub = "xPub";
+  static const _kToken = 'token';
+  static const _kUserId = 'userId';
+  static const _kDeviceId = 'deviceId';
+  static const _kDeviceName = 'deviceName';
+  static const _kXPriv = 'xPriv';
+  static const _kXPub = 'xPub';
+  static const _kEdPriv = 'edPriv';
+  static const _kEdPub = 'edPub';
 
-  static String _chatKeyStorageKey(int chatId) => "chatKey_$chatId";
+  static String _chatKeyStorageKey(int chatId) => 'chatKey_$chatId';
 
   Future<void> init() async {
     token = await _storage.read(key: _kToken);
@@ -38,6 +42,8 @@ class Session {
     deviceName = await _storage.read(key: _kDeviceName);
     x25519PrivateKeyB64 = await _storage.read(key: _kXPriv);
     x25519PublicKeyB64 = await _storage.read(key: _kXPub);
+    ed25519PrivateKeyB64 = await _storage.read(key: _kEdPriv);
+    ed25519PublicKeyB64 = await _storage.read(key: _kEdPub);
   }
 
   bool get isAuthed => token != null && userId != null;
@@ -46,7 +52,11 @@ class Session {
       x25519PrivateKeyB64 != null &&
       x25519PrivateKeyB64!.isNotEmpty &&
       x25519PublicKeyB64 != null &&
-      x25519PublicKeyB64!.isNotEmpty;
+      x25519PublicKeyB64!.isNotEmpty &&
+      ed25519PrivateKeyB64 != null &&
+      ed25519PrivateKeyB64!.isNotEmpty &&
+      ed25519PublicKeyB64 != null &&
+      ed25519PublicKeyB64!.isNotEmpty;
 
   Future<void> saveAuth({required String token, required int userId}) async {
     this.token = token;
@@ -61,16 +71,22 @@ class Session {
     required String deviceName,
     required String xPriv,
     required String xPub,
+    required String edPriv,
+    required String edPub,
   }) async {
     this.deviceId = deviceId;
     this.deviceName = deviceName;
     x25519PrivateKeyB64 = xPriv;
     x25519PublicKeyB64 = xPub;
+    ed25519PrivateKeyB64 = edPriv;
+    ed25519PublicKeyB64 = edPub;
 
     await _storage.write(key: _kDeviceId, value: deviceId.toString());
     await _storage.write(key: _kDeviceName, value: deviceName);
     await _storage.write(key: _kXPriv, value: xPriv);
     await _storage.write(key: _kXPub, value: xPub);
+    await _storage.write(key: _kEdPriv, value: edPriv);
+    await _storage.write(key: _kEdPub, value: edPub);
   }
 
   Future<void> saveChatKey(int chatId, Uint8List key) async {
@@ -90,6 +106,11 @@ class Session {
     await _storage.delete(key: _chatKeyStorageKey(chatId));
   }
 
+  Map<String, String> authHeaders() {
+    if (token == null) return const {};
+    return {'Authorization': 'Bearer $token'};
+  }
+
   Future<void> logout() async {
     token = null;
     userId = null;
@@ -105,13 +126,8 @@ class Session {
     deviceName = null;
     x25519PrivateKeyB64 = null;
     x25519PublicKeyB64 = null;
-
+    ed25519PrivateKeyB64 = null;
+    ed25519PublicKeyB64 = null;
     await _storage.deleteAll();
-  }
-
-  Map<String, String> authHeaders() {
-    final t = token;
-    if (t == null || t.isEmpty) return {};
-    return {"Authorization": "Bearer $t"};
   }
 }

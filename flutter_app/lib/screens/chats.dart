@@ -38,6 +38,7 @@ class _ChatsScreenState extends State<ChatsScreen> {
 
     try {
       await ChatKeyService.instance.importMyChatKeys();
+
       final res = await Api.instance.getList('/chats');
       final loadedChats = res.cast<Map<String, dynamic>>();
       final membersByChat = <int, List<Map<String, dynamic>>>{};
@@ -87,143 +88,29 @@ class _ChatsScreenState extends State<ChatsScreen> {
     );
   }
 
-  String _chatTitle(Map<String, dynamic> chat) {
-    final title = chat['title']?.toString().trim();
-    if (title != null && title.isNotEmpty) {
-      return title;
-    }
-
-    final members = _membersByChat[chat['id'] as int? ?? -1] ?? const [];
-    if (chat['is_group'] == true) {
-      return members.isEmpty
-          ? 'Групповой чат'
-          : members.map((e) => e['username']).join(', ');
-    }
-
-    for (final member in members) {
-      if (member['id'] != Session.instance.userId) {
-        return member['username']?.toString() ?? 'Личный чат';
-      }
-    }
-    return 'Личный чат';
-  }
-
   String _chatSubtitle(Map<String, dynamic> chat) {
-    final members = _membersByChat[chat['id'] as int? ?? -1] ?? const [];
-    if (chat['is_group'] == true) {
-      if (members.isEmpty) return 'Групповой защищённый чат';
-      return '${members.length} участников';
-    }
-    return 'Личный защищённый чат';
-  }
+    final id = chat['id'];
+    if (id is! int) return 'Личный защищённый чат';
 
-  Future<void> _openChat(Map<String, dynamic> chat) async {
-    await Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (_) => ChatViewScreen(
-          chatId: chat['id'] as int,
-          title: _chatTitle(chat),
-        ),
-      ),
-    );
+    final members = _membersByChat[id] ?? [];
+    if (members.isEmpty) return 'Личный защищённый чат';
 
-    await _load();
-  }
+    final otherUsers = members
+        .where((m) => m['id'] != Session.instance.userId)
+        .map((m) => (m['username'] ?? '').toString())
+        .where((s) => s.isNotEmpty)
+        .toList();
 
-  Future<void> _deleteChat(Map<String, dynamic> chat) async {
-    final title = _chatTitle(chat);
-    final chatId = chat['id'] as int;
-
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (context) {
-        return AlertDialog(
-          title: const Text('Удалить чат'),
-          content: Text(
-            'Чат "$title" будет удалён полностью у всех участников. Продолжить?',
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context, false),
-              child: const Text('Отмена'),
-            ),
-            FilledButton(
-              onPressed: () => Navigator.pop(context, true),
-              style: FilledButton.styleFrom(
-                backgroundColor: AppTheme.danger,
-              ),
-              child: const Text('Удалить'),
-            ),
-          ],
-        );
-      },
-    );
-
-    if (confirmed != true) return;
-
-    try {
-      await Api.instance.delete('/chats/$chatId');
-
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Чат удалён')),
-      );
-
-      await _load();
-    } catch (e) {
-      if (!mounted) return;
-      setState(() {
-        err = e.toString().replaceFirst('Exception: ', '');
-      });
-    }
-  }
-
-  Future<void> _showChatMenu(Map<String, dynamic> chat) async {
-    final result = await showModalBottomSheet<String>(
-      context: context,
-      showDragHandle: true,
-      builder: (context) {
-        return SafeArea(
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(8, 4, 8, 12),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                ListTile(
-                  leading: const Icon(Icons.chat_bubble_outline_rounded),
-                  title: const Text('Открыть чат'),
-                  onTap: () => Navigator.pop(context, 'open'),
-                ),
-                ListTile(
-                  leading: const Icon(
-                    Icons.delete_outline_rounded,
-                    color: AppTheme.danger,
-                  ),
-                  title: const Text(
-                    'Удалить чат',
-                    style: TextStyle(color: AppTheme.danger),
-                  ),
-                  onTap: () => Navigator.pop(context, 'delete'),
-                ),
-              ],
-            ),
-          ),
-        );
-      },
-    );
-
-    if (result == 'open') {
-      await _openChat(chat);
-    } else if (result == 'delete') {
-      await _deleteChat(chat);
-    }
+    if (otherUsers.isEmpty) return 'Личный защищённый чат';
+    return otherUsers.join(', ');
   }
 
   List<Map<String, dynamic>> get _filteredChats {
-    if (_search.trim().isEmpty) return chats;
     final q = _search.trim().toLowerCase();
+    if (q.isEmpty) return chats;
+
     return chats.where((chat) {
-      final title = _chatTitle(chat).toLowerCase();
+      final title = (chat['title'] ?? '').toString().toLowerCase();
       final subtitle = _chatSubtitle(chat).toLowerCase();
       return title.contains(q) || subtitle.contains(q);
     }).toList();
@@ -234,138 +121,132 @@ class _ChatsScreenState extends State<ChatsScreen> {
     final filtered = _filteredChats;
 
     return Scaffold(
+      backgroundColor: AppTheme.background,
       appBar: AppBar(
         title: const Text('Защищённый чат'),
         actions: [
           IconButton(
-            tooltip: 'Обновить',
-            icon: const Icon(Icons.refresh_rounded),
             onPressed: _load,
+            icon: const Icon(Icons.refresh_rounded),
           ),
           IconButton(
-            tooltip: 'Выйти',
-            icon: const Icon(Icons.logout_rounded),
             onPressed: _logout,
+            icon: const Icon(Icons.logout_rounded),
           ),
         ],
       ),
       floatingActionButton: FloatingActionButton.extended(
         onPressed: _openCreateChat,
-        icon: const Icon(Icons.add_comment_rounded),
+        icon: const Icon(Icons.add_comment_outlined),
         label: const Text('Новый чат'),
       ),
-      body: Column(
-        children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 12, 16, 10),
-            child: TextField(
-              onChanged: (value) => setState(() => _search = value),
-              decoration: const InputDecoration(
-                hintText: 'Поиск по чатам',
-                prefixIcon: Icon(Icons.search_rounded),
+      body: SafeArea(
+        child: Column(
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+              child: TextField(
+                onChanged: (v) => setState(() => _search = v),
+                decoration: InputDecoration(
+                  hintText: 'Поиск по чатам',
+                  prefixIcon: const Icon(Icons.search_rounded),
+                  filled: true,
+                  fillColor: Colors.white,
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(22),
+                    borderSide: const BorderSide(color: AppTheme.border),
+                  ),
+                  enabledBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(22),
+                    borderSide: const BorderSide(color: AppTheme.border),
+                  ),
+                  focusedBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(22),
+                    borderSide: const BorderSide(color: AppTheme.primary),
+                  ),
+                ),
               ),
             ),
-          ),
-          if (err != null)
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 0, 16, 10),
-              child: Container(
+            if (err != null)
+              Container(
                 width: double.infinity,
-                padding: const EdgeInsets.all(14),
+                margin: const EdgeInsets.fromLTRB(16, 8, 16, 12),
+                padding: const EdgeInsets.all(16),
                 decoration: BoxDecoration(
-                  color: const Color(0xFFFEECEC),
-                  borderRadius: BorderRadius.circular(16),
+                  color: const Color(0xFFFFE9E9),
+                  borderRadius: BorderRadius.circular(18),
                 ),
                 child: Text(
                   err!,
                   style: const TextStyle(
                     color: AppTheme.danger,
-                    fontWeight: FontWeight.w600,
+                    fontWeight: FontWeight.w700,
                   ),
                 ),
               ),
-            ),
-          Expanded(
-            child: loading
-                ? const Center(child: CircularProgressIndicator())
-                : filtered.isEmpty
-                    ? RefreshIndicator(
-                        onRefresh: _load,
-                        child: ListView(
-                          physics: const AlwaysScrollableScrollPhysics(),
-                          children: const [
-                            SizedBox(height: 120),
-                            Icon(
-                              Icons.forum_outlined,
-                              size: 56,
+            Expanded(
+              child: loading
+                  ? const Center(child: CircularProgressIndicator())
+                  : filtered.isEmpty
+                      ? const Center(
+                          child: Text(
+                            'Пока нет чатов',
+                            style: TextStyle(
                               color: AppTheme.textSecondary,
+                              fontSize: 16,
                             ),
-                            SizedBox(height: 16),
-                            Center(
-                              child: Text(
-                                'Пока нет чатов',
-                                style: TextStyle(
-                                  fontSize: 18,
-                                  fontWeight: FontWeight.w700,
-                                  color: AppTheme.textPrimary,
-                                ),
-                              ),
-                            ),
-                            SizedBox(height: 8),
-                            Center(
-                              child: Text(
-                                'Создайте первый защищённый чат.',
-                                style: TextStyle(color: AppTheme.textSecondary),
-                              ),
-                            ),
-                          ],
-                        ),
-                      )
-                    : RefreshIndicator(
-                        onRefresh: _load,
-                        child: ListView.separated(
-                          padding: const EdgeInsets.fromLTRB(16, 6, 16, 96),
-                          itemCount: filtered.length,
-                          separatorBuilder: (_, __) => const SizedBox(height: 10),
+                          ),
+                        )
+                      : ListView.separated(
+                          padding: const EdgeInsets.fromLTRB(16, 8, 16, 100),
                           itemBuilder: (context, index) {
                             final chat = filtered[index];
-                            final isGroup = chat['is_group'] == true;
-                            final title = _chatTitle(chat);
-                            final subtitle = _chatSubtitle(chat);
-                            final avatarText = title.isNotEmpty
-                                ? title.characters.first.toUpperCase()
-                                : '#';
+                            final chatId = chat['id'] as int;
+                            final title = (chat['title'] ?? 'Чат').toString();
 
-                            return Card(
+                            return Material(
+                              color: Colors.white,
+                              borderRadius: BorderRadius.circular(24),
                               child: InkWell(
                                 borderRadius: BorderRadius.circular(24),
-                                onTap: () => _openChat(chat),
-                                onLongPress: () => _showChatMenu(chat),
-                                child: Padding(
-                                  padding: const EdgeInsets.symmetric(
-                                    horizontal: 16,
-                                    vertical: 14,
+                                onTap: () {
+                                  Navigator.of(context).push(
+                                    MaterialPageRoute(
+                                      builder: (_) => ChatViewScreen(
+                                        chatId: chatId,
+                                        title: title,
+                                      ),
+                                    ),
+                                  );
+                                },
+                                child: Container(
+                                  padding: const EdgeInsets.all(18),
+                                  decoration: BoxDecoration(
+                                    borderRadius: BorderRadius.circular(24),
+                                    border: Border.all(color: AppTheme.border),
                                   ),
                                   child: Row(
                                     children: [
-                                      CircleAvatar(
-                                        radius: 26,
-                                        backgroundColor: isGroup
-                                            ? const Color(0x1F2AABEE)
-                                            : const Color(0xFFE8F5E9),
-                                        foregroundColor: isGroup
-                                            ? AppTheme.primaryDark
-                                            : const Color(0xFF2E7D32),
-                                        child: isGroup
-                                            ? const Icon(Icons.groups_rounded)
-                                            : Text(
-                                                avatarText,
-                                                style: const TextStyle(
-                                                  fontWeight: FontWeight.w800,
-                                                ),
-                                              ),
+                                      Container(
+                                        width: 56,
+                                        height: 56,
+                                        decoration: const BoxDecoration(
+                                          color: Color(0xFFE8F5E9),
+                                          shape: BoxShape.circle,
+                                        ),
+                                        alignment: Alignment.center,
+                                        child: Text(
+                                          title.isNotEmpty
+                                              ? title.characters.first.toUpperCase()
+                                              : 'Ч',
+                                          style: const TextStyle(
+                                            fontSize: 28,
+                                            fontWeight: FontWeight.w800,
+                                            color: Color(0xFF2E7D32),
+                                          ),
+                                        ),
                                       ),
-                                      const SizedBox(width: 14),
+                                      const SizedBox(width: 16),
                                       Expanded(
                                         child: Column(
                                           crossAxisAlignment:
@@ -373,49 +254,29 @@ class _ChatsScreenState extends State<ChatsScreen> {
                                           children: [
                                             Text(
                                               title,
-                                              maxLines: 1,
-                                              overflow: TextOverflow.ellipsis,
                                               style: const TextStyle(
-                                                fontWeight: FontWeight.w700,
-                                                fontSize: 16,
+                                                fontSize: 18,
+                                                fontWeight: FontWeight.w800,
+                                                color: AppTheme.textPrimary,
                                               ),
                                             ),
-                                            const SizedBox(height: 5),
+                                            const SizedBox(height: 6),
                                             Text(
-                                              subtitle,
+                                              _chatSubtitle(chat),
+                                              style: const TextStyle(
+                                                fontSize: 14,
+                                                color: AppTheme.textSecondary,
+                                              ),
                                               maxLines: 1,
                                               overflow: TextOverflow.ellipsis,
-                                              style: const TextStyle(
-                                                color: AppTheme.textSecondary,
-                                                fontSize: 13,
-                                              ),
                                             ),
                                           ],
                                         ),
                                       ),
-                                      PopupMenuButton<String>(
-                                        tooltip: 'Действия',
-                                        onSelected: (value) async {
-                                          if (value == 'open') {
-                                            await _openChat(chat);
-                                          } else if (value == 'delete') {
-                                            await _deleteChat(chat);
-                                          }
-                                        },
-                                        itemBuilder: (context) => const [
-                                          PopupMenuItem(
-                                            value: 'open',
-                                            child: Text('Открыть'),
-                                          ),
-                                          PopupMenuItem(
-                                            value: 'delete',
-                                            child: Text('Удалить чат'),
-                                          ),
-                                        ],
-                                        icon: const Icon(
-                                          Icons.more_vert_rounded,
-                                          color: AppTheme.textSecondary,
-                                        ),
+                                      const SizedBox(width: 8),
+                                      const Icon(
+                                        Icons.more_vert_rounded,
+                                        color: AppTheme.textSecondary,
                                       ),
                                     ],
                                   ),
@@ -423,10 +284,13 @@ class _ChatsScreenState extends State<ChatsScreen> {
                               ),
                             );
                           },
+                          separatorBuilder: (_, __) =>
+                              const SizedBox(height: 12),
+                          itemCount: filtered.length,
                         ),
-                      ),
-          ),
-        ],
+            ),
+          ],
+        ),
       ),
     );
   }

@@ -16,12 +16,14 @@ class TokenOut(BaseModel):
 class AddDeviceIn(BaseModel):
     device_name: str
     pubkey_b64: str
+    sign_pubkey_b64: str
 
 
 class DeviceOut(BaseModel):
     id: int
     device_name: str
     pubkey_b64: str
+    sign_pubkey_b64: str
     is_active: bool
 
 
@@ -46,6 +48,8 @@ class MessageIn(BaseModel):
     chat_id: int
     payload_json: str
     sender_device_id: int
+    signature_b64: Optional[str] = None
+    sig_alg: Optional[str] = None
 
 
 class MessageOut(BaseModel):
@@ -54,6 +58,8 @@ class MessageOut(BaseModel):
     sender_user_id: int
     sender_device_id: int
     payload_json: str
+    signature_b64: Optional[str] = None
+    sig_alg: Optional[str] = None
     created_at: str
 
 

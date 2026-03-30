@@ -44,10 +44,12 @@ class _ChatViewScreenState extends State<ChatViewScreen> {
   List<Map<String, dynamic>> messages = [];
   Uint8List? _chatKey;
   Map<int, String> _usernamesById = {};
+  Map<int, String> _deviceSignPubById = {};
   List<Map<String, dynamic>> _members = [];
 
   Timer? _timer;
   bool _shouldScrollAfterBuild = false;
+  bool _memberMetaLoaded = false;
 
   bool get _canRecordVoice => VoiceRecorderService.instance.canRecord;
 
@@ -72,8 +74,8 @@ class _ChatViewScreenState extends State<ChatViewScreen> {
   Future<void> _ensureChatKey() async {
     _chatKey = await ChatKeyService.instance.ensureChatKey(
       chatId: widget.chatId,
-      retries: 4,
-      delay: const Duration(milliseconds: 700),
+      retries: 3,
+      delay: const Duration(milliseconds: 500),
     );
 
     if (_chatKey == null) {
@@ -83,7 +85,7 @@ class _ChatViewScreenState extends State<ChatViewScreen> {
     }
   }
 
-  Future<void> _loadMembers() async {
+  Future<void> _loadMembersBasic() async {
     final members =
         await Api.instance.getList('/chats/${widget.chatId}/members');
     final usernamesById = <int, String>{};
@@ -98,6 +100,36 @@ class _ChatViewScreenState extends State<ChatViewScreen> {
 
     _members = members.cast<Map<String, dynamic>>();
     _usernamesById = usernamesById;
+  }
+
+  Future<void> _loadDeviceSigningKeysBackground() async {
+    if (_memberMetaLoaded || _members.isEmpty) return;
+
+    final deviceSignPubById = <int, String>{};
+
+    for (final raw in _members) {
+      final userId = raw['id'];
+      if (userId is! int) continue;
+
+      try {
+        final devices = await Api.instance
+            .getList('/users/$userId/devices')
+            .timeout(const Duration(seconds: 8));
+
+        for (final d in devices.cast<Map<String, dynamic>>()) {
+          final deviceId = d['id'];
+          final signPub = d['sign_pubkey_b64']?.toString() ?? '';
+          if (deviceId is int && signPub.isNotEmpty) {
+            deviceSignPubById[deviceId] = signPub;
+          }
+        }
+      } catch (e) {
+        debugPrint('load device signing keys failed for user=$userId: $e');
+      }
+    }
+
+    _deviceSignPubById = deviceSignPubById;
+    _memberMetaLoaded = true;
   }
 
   bool _isNearBottom() {
@@ -140,6 +172,7 @@ class _ChatViewScreenState extends State<ChatViewScreen> {
       if (aMsg['attachment_id'] != bMsg['attachment_id']) return false;
       if (aMsg['name'] != bMsg['name']) return false;
       if (aMsg['duration_ms'] != bMsg['duration_ms']) return false;
+      if (aMsg['verified'] != bMsg['verified']) return false;
     }
 
     return true;
@@ -159,7 +192,11 @@ class _ChatViewScreenState extends State<ChatViewScreen> {
     try {
       await ChatKeyService.instance.syncChatKeyForChat(widget.chatId);
       await _ensureChatKey();
-      await _loadMembers();
+
+      if (_members.isEmpty) {
+        await _loadMembersBasic();
+        unawaited(_loadDeviceSigningKeysBackground());
+      }
 
       final res =
           await Api.instance.getList('/chats/${widget.chatId}/messages?limit=100');
@@ -174,12 +211,32 @@ class _ChatViewScreenState extends State<ChatViewScreen> {
           );
 
           final senderId = m['sender_user_id'] as int?;
+          final senderDeviceId = m['sender_device_id'] as int?;
+          bool? verified;
+          final signatureB64 = m['signature_b64']?.toString();
+          final signPub =
+              senderDeviceId == null ? null : _deviceSignPubById[senderDeviceId];
+
+          if (signatureB64 != null &&
+              signatureB64.isNotEmpty &&
+              signPub != null &&
+              senderDeviceId != null) {
+            verified = await CryptoService.instance.verifyMessageEnvelope(
+              payloadJson: m['payload_json'] as String,
+              chatId: widget.chatId,
+              senderDeviceId: senderDeviceId,
+              signatureB64: signatureB64,
+              publicKeyB64: signPub,
+            );
+          }
+
           out.add({
             'id': m['id'],
             'sender_user_id': senderId,
-            'sender_device_id': m['sender_device_id'],
+            'sender_device_id': senderDeviceId,
             'created_at': m['created_at'],
             'sender_username': _usernamesById[senderId ?? -1] ?? 'Пользователь',
+            'verified': verified,
             ...plain,
           });
         } catch (e) {
@@ -257,14 +314,22 @@ class _ChatViewScreenState extends State<ChatViewScreen> {
         aad: 'chat:${widget.chatId}',
       );
 
+      final signature = await CryptoService.instance.signMessageEnvelope(
+        payloadJson: payload,
+        chatId: widget.chatId,
+        senderDeviceId: Session.instance.deviceId!,
+        privateKeyB64: Session.instance.ed25519PrivateKeyB64!,
+      );
+
       await Api.instance.post('/messages', {
         'chat_id': widget.chatId,
         'payload_json': payload,
         'sender_device_id': Session.instance.deviceId,
+        'signature_b64': signature,
+        'sig_alg': 'ed25519',
       });
 
       _shouldScrollAfterBuild = true;
-      await ChatKeyService.instance.syncChatKeyForChat(widget.chatId);
       await _loadHistory(silent: true);
     } catch (e) {
       if (!mounted) return;
@@ -293,6 +358,7 @@ class _ChatViewScreenState extends State<ChatViewScreen> {
 
       final req = http.MultipartRequest('POST', Api.instance.uri('/attachments'));
       req.headers.addAll(Session.instance.authHeaders());
+      req.fields['chat_id'] = widget.chatId.toString();
 
       req.files.add(
         http.MultipartFile.fromBytes(
@@ -322,14 +388,22 @@ class _ChatViewScreenState extends State<ChatViewScreen> {
         aad: 'chat:${widget.chatId}',
       );
 
+      final signature = await CryptoService.instance.signMessageEnvelope(
+        payloadJson: payload,
+        chatId: widget.chatId,
+        senderDeviceId: Session.instance.deviceId!,
+        privateKeyB64: Session.instance.ed25519PrivateKeyB64!,
+      );
+
       await Api.instance.post('/messages', {
         'chat_id': widget.chatId,
         'payload_json': payload,
         'sender_device_id': Session.instance.deviceId,
+        'signature_b64': signature,
+        'sig_alg': 'ed25519',
       });
 
       _shouldScrollAfterBuild = true;
-      await ChatKeyService.instance.syncChatKeyForChat(widget.chatId);
       await _loadHistory(silent: true);
     } catch (e) {
       if (!mounted) return;
@@ -401,6 +475,7 @@ class _ChatViewScreenState extends State<ChatViewScreen> {
 
       final req = http.MultipartRequest('POST', Api.instance.uri('/attachments'));
       req.headers.addAll(Session.instance.authHeaders());
+      req.fields['chat_id'] = widget.chatId.toString();
 
       req.files.add(
         http.MultipartFile.fromBytes(
@@ -432,10 +507,19 @@ class _ChatViewScreenState extends State<ChatViewScreen> {
         aad: 'chat:${widget.chatId}',
       );
 
+      final signature = await CryptoService.instance.signMessageEnvelope(
+        payloadJson: payload,
+        chatId: widget.chatId,
+        senderDeviceId: Session.instance.deviceId!,
+        privateKeyB64: Session.instance.ed25519PrivateKeyB64!,
+      );
+
       await Api.instance.post('/messages', {
         'chat_id': widget.chatId,
         'payload_json': payload,
         'sender_device_id': Session.instance.deviceId,
+        'signature_b64': signature,
+        'sig_alg': 'ed25519',
       });
 
       try {
@@ -445,7 +529,6 @@ class _ChatViewScreenState extends State<ChatViewScreen> {
       } catch (_) {}
 
       _shouldScrollAfterBuild = true;
-      await ChatKeyService.instance.syncChatKeyForChat(widget.chatId);
       await _loadHistory(silent: true);
     } catch (e) {
       if (!mounted) return;

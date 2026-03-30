@@ -51,6 +51,7 @@ class MessageTile extends StatelessWidget {
   Widget build(BuildContext context) {
     final type = (message['type'] ?? 'text').toString();
     final createdAt = formatMoscowTime(message['created_at']?.toString());
+    final verified = message['verified'] as bool?;
 
     final bubbleColor = isMine ? AppTheme.bubbleMine : AppTheme.bubbleOther;
     final align = isMine ? Alignment.centerRight : Alignment.centerLeft;
@@ -226,6 +227,21 @@ class MessageTile extends StatelessWidget {
                     Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
+                        if (verified == true) ...[
+                          const Icon(
+                            Icons.verified_user_rounded,
+                            size: 14,
+                            color: AppTheme.primary,
+                          ),
+                          const SizedBox(width: 4),
+                        ] else if (verified == false) ...[
+                          const Icon(
+                            Icons.warning_amber_rounded,
+                            size: 14,
+                            color: AppTheme.danger,
+                          ),
+                          const SizedBox(width: 4),
+                        ],
                         Text(
                           createdAt,
                           style: const TextStyle(

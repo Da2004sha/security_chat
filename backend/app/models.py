@@ -25,6 +25,7 @@ class Device(Base):
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
     device_name: Mapped[str] = mapped_column(String(128))
     pubkey_b64: Mapped[str] = mapped_column(String(128))
+    sign_pubkey_b64: Mapped[str] = mapped_column(String(128), default="")
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
@@ -65,13 +66,8 @@ class ChatKey(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     chat_id: Mapped[int] = mapped_column(ForeignKey("chats.id"), index=True)
     device_id: Mapped[int] = mapped_column(ForeignKey("devices.id"), index=True)
-
-    # какое устройство завернуло ключ
     wrapped_by_device_id: Mapped[int] = mapped_column(index=True)
-
-    # opaque ciphertext с chatKey, зашифрованный под device_id
     wrapped_key_json: Mapped[str] = mapped_column(Text)
-
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
     chat: Mapped["Chat"] = relationship(back_populates="chat_keys")
@@ -84,10 +80,9 @@ class Message(Base):
     chat_id: Mapped[int] = mapped_column(ForeignKey("chats.id"), index=True)
     sender_user_id: Mapped[int] = mapped_column(index=True)
     sender_device_id: Mapped[int] = mapped_column(index=True)
-
-    # теперь это единый ciphertext для chatKey
     payload_json: Mapped[str] = mapped_column(Text)
-
+    signature_b64: Mapped[str | None] = mapped_column(Text, nullable=True)
+    sig_alg: Mapped[str | None] = mapped_column(String(32), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
 
@@ -96,6 +91,7 @@ class Attachment(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     owner_user_id: Mapped[int] = mapped_column(index=True)
+    chat_id: Mapped[int] = mapped_column(ForeignKey("chats.id"), index=True)
     filename: Mapped[str] = mapped_column(String(255))
     content_type: Mapped[str] = mapped_column(String(128))
     size_bytes: Mapped[int] = mapped_column()
