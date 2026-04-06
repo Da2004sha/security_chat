@@ -89,7 +89,7 @@ class _ChangePasswordScreenState extends State<ChangePasswordScreen> {
               onPressed: loading ? null : _submit,
               child: loading
                   ? const CircularProgressIndicator()
-                  : const Text('Сменить пароль'),
+                  : const Text('cменить пароль'),
             ),
           ],
         ),
