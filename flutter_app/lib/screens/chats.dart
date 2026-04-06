@@ -7,6 +7,7 @@ import '../theme/app_theme.dart';
 import 'chat_view.dart';
 import 'create_chat.dart';
 import 'login.dart';
+import 'change_password.dart';
 
 class ChatsScreen extends StatefulWidget {
   const ChatsScreen({super.key});
@@ -65,6 +66,46 @@ class _ChatsScreenState extends State<ChatsScreen> {
         err = e.toString().replaceFirst('Exception: ', '');
         loading = false;
       });
+    }
+  }
+
+  Future<void> _deleteChat(int chatId) async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: const Text('Удалить чат'),
+        content: const Text('Вы уверены? Это действие нельзя отменить.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Отмена'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text(
+              'Удалить',
+              style: TextStyle(color: Colors.red),
+            ),
+          ),
+        ],
+      ),
+    );
+
+    if (confirm != true) return;
+
+    try {
+      await Api.instance.delete('/chats/$chatId');
+
+      // удаляем ключ чата с устройства
+      await Session.instance.deleteChatKey(chatId);
+
+      await _load();
+    } catch (e) {
+      if (!mounted) return;
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Ошибка удаления: $e')),
+      );
     }
   }
 
@@ -130,6 +171,15 @@ class _ChatsScreenState extends State<ChatsScreen> {
             icon: const Icon(Icons.refresh_rounded),
           ),
           IconButton(
+  icon: const Icon(Icons.lock_reset),
+  onPressed: () {
+    Navigator.of(context).push(
+      MaterialPageRoute(builder: (_) => const ChangePasswordScreen()),
+    );
+  },
+),
+          
+          IconButton(
             onPressed: _logout,
             icon: const Icon(Icons.logout_rounded),
           ),
@@ -154,139 +204,50 @@ class _ChatsScreenState extends State<ChatsScreen> {
                   fillColor: Colors.white,
                   border: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(22),
-                    borderSide: const BorderSide(color: AppTheme.border),
-                  ),
-                  enabledBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(22),
-                    borderSide: const BorderSide(color: AppTheme.border),
-                  ),
-                  focusedBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(22),
-                    borderSide: const BorderSide(color: AppTheme.primary),
                   ),
                 ),
               ),
             ),
-            if (err != null)
-              Container(
-                width: double.infinity,
-                margin: const EdgeInsets.fromLTRB(16, 8, 16, 12),
-                padding: const EdgeInsets.all(16),
-                decoration: BoxDecoration(
-                  color: const Color(0xFFFFE9E9),
-                  borderRadius: BorderRadius.circular(18),
-                ),
-                child: Text(
-                  err!,
-                  style: const TextStyle(
-                    color: AppTheme.danger,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-              ),
             Expanded(
               child: loading
                   ? const Center(child: CircularProgressIndicator())
                   : filtered.isEmpty
-                      ? const Center(
-                          child: Text(
-                            'Пока нет чатов',
-                            style: TextStyle(
-                              color: AppTheme.textSecondary,
-                              fontSize: 16,
-                            ),
-                          ),
-                        )
-                      : ListView.separated(
-                          padding: const EdgeInsets.fromLTRB(16, 8, 16, 100),
+                      ? const Center(child: Text('Пока нет чатов'))
+                      : ListView.builder(
+                          itemCount: filtered.length,
                           itemBuilder: (context, index) {
                             final chat = filtered[index];
                             final chatId = chat['id'] as int;
                             final title = (chat['title'] ?? 'Чат').toString();
 
-                            return Material(
-                              color: Colors.white,
-                              borderRadius: BorderRadius.circular(24),
-                              child: InkWell(
-                                borderRadius: BorderRadius.circular(24),
-                                onTap: () {
-                                  Navigator.of(context).push(
-                                    MaterialPageRoute(
-                                      builder: (_) => ChatViewScreen(
-                                        chatId: chatId,
-                                        title: title,
-                                      ),
+                            return ListTile(
+                              title: Text(title),
+                              subtitle: Text(_chatSubtitle(chat)),
+                              onTap: () {
+                                Navigator.of(context).push(
+                                  MaterialPageRoute(
+                                    builder: (_) => ChatViewScreen(
+                                      chatId: chatId,
+                                      title: title,
                                     ),
-                                  );
+                                  ),
+                                );
+                              },
+                              trailing: PopupMenuButton<String>(
+                                onSelected: (value) {
+                                  if (value == 'delete') {
+                                    _deleteChat(chatId);
+                                  }
                                 },
-                                child: Container(
-                                  padding: const EdgeInsets.all(18),
-                                  decoration: BoxDecoration(
-                                    borderRadius: BorderRadius.circular(24),
-                                    border: Border.all(color: AppTheme.border),
+                                itemBuilder: (_) => [
+                                  const PopupMenuItem(
+                                    value: 'delete',
+                                    child: Text('Удалить чат'),
                                   ),
-                                  child: Row(
-                                    children: [
-                                      Container(
-                                        width: 56,
-                                        height: 56,
-                                        decoration: const BoxDecoration(
-                                          color: Color(0xFFE8F5E9),
-                                          shape: BoxShape.circle,
-                                        ),
-                                        alignment: Alignment.center,
-                                        child: Text(
-                                          title.isNotEmpty
-                                              ? title.characters.first.toUpperCase()
-                                              : 'Ч',
-                                          style: const TextStyle(
-                                            fontSize: 28,
-                                            fontWeight: FontWeight.w800,
-                                            color: Color(0xFF2E7D32),
-                                          ),
-                                        ),
-                                      ),
-                                      const SizedBox(width: 16),
-                                      Expanded(
-                                        child: Column(
-                                          crossAxisAlignment:
-                                              CrossAxisAlignment.start,
-                                          children: [
-                                            Text(
-                                              title,
-                                              style: const TextStyle(
-                                                fontSize: 18,
-                                                fontWeight: FontWeight.w800,
-                                                color: AppTheme.textPrimary,
-                                              ),
-                                            ),
-                                            const SizedBox(height: 6),
-                                            Text(
-                                              _chatSubtitle(chat),
-                                              style: const TextStyle(
-                                                fontSize: 14,
-                                                color: AppTheme.textSecondary,
-                                              ),
-                                              maxLines: 1,
-                                              overflow: TextOverflow.ellipsis,
-                                            ),
-                                          ],
-                                        ),
-                                      ),
-                                      const SizedBox(width: 8),
-                                      const Icon(
-                                        Icons.more_vert_rounded,
-                                        color: AppTheme.textSecondary,
-                                      ),
-                                    ],
-                                  ),
-                                ),
+                                ],
                               ),
                             );
                           },
-                          separatorBuilder: (_, __) =>
-                              const SizedBox(height: 12),
-                          itemCount: filtered.length,
                         ),
             ),
           ],

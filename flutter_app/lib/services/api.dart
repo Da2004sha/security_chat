@@ -15,7 +15,7 @@ class Api {
 
   late final http.Client _client;
 
-  String baseUrl = 'https://eustatically-gustatory-jamar.ngrok-free.dev';
+  String baseUrl = 'https://securitychat-production.up.railway.app';
 
   http.Client _buildClient() {
     final ioHttpClient = HttpClient();

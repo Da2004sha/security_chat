@@ -61,6 +61,7 @@ class MessageOut(BaseModel):
     signature_b64: Optional[str] = None
     sig_alg: Optional[str] = None
     created_at: str
+    is_deleted: bool = False
 
 
 class UploadOut(BaseModel):
@@ -87,3 +88,7 @@ class ChatKeyOut(BaseModel):
 
 class ChatKeyDeviceOut(BaseModel):
     device_id: int
+
+class ChangePasswordIn(BaseModel):
+    current_password: str
+    new_password: str = Field(min_length=6, max_length=128)

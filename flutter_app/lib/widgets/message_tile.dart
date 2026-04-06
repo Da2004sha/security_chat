@@ -9,6 +9,9 @@ class MessageTile extends StatelessWidget {
   final bool showSender;
   final Future<void> Function(Map<String, dynamic> msg)? onOpenFile;
 
+  // 🔥 новое
+  final VoidCallback? onDeleteMessage;
+
   const MessageTile({
     super.key,
     required this.message,
@@ -16,6 +19,7 @@ class MessageTile extends StatelessWidget {
     required this.senderName,
     required this.showSender,
     this.onOpenFile,
+    this.onDeleteMessage,
   });
 
   static DateTime? parseMoscowDate(String? raw) {
@@ -66,7 +70,19 @@ class MessageTile extends StatelessWidget {
 
     Widget content;
 
-    if (type == 'voice') {
+    // 🔥 УДАЛЁННОЕ СООБЩЕНИЕ
+    if (type == 'deleted') {
+      content = const Text(
+        'Сообщение удалено',
+        style: TextStyle(
+          fontStyle: FontStyle.italic,
+          color: Colors.grey,
+        ),
+      );
+    }
+
+    // голос
+    else if (type == 'voice') {
       final durationMs = (message['duration_ms'] as num?)?.toInt() ?? 0;
       final seconds = (durationMs / 1000).round();
       final durationLabel =
@@ -109,7 +125,10 @@ class MessageTile extends StatelessWidget {
           ),
         ],
       );
-    } else if (type == 'file') {
+    }
+
+    // файл
+    else if (type == 'file') {
       final name = (message['name'] ?? 'Файл').toString();
 
       content = Column(
@@ -149,11 +168,8 @@ class MessageTile extends StatelessWidget {
               child: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Icon(
-                    Icons.open_in_new_rounded,
-                    size: 18,
-                    color: AppTheme.primary,
-                  ),
+                  Icon(Icons.open_in_new_rounded,
+                      size: 18, color: AppTheme.primary),
                   SizedBox(width: 6),
                   Text(
                     'Открыть файл',
@@ -168,7 +184,10 @@ class MessageTile extends StatelessWidget {
           ),
         ],
       );
-    } else {
+    }
+
+    // текст
+    else {
       final text = (message['text'] ?? '').toString();
       content = Text(
         text,
@@ -191,9 +210,31 @@ class MessageTile extends StatelessWidget {
             borderRadius: radius,
             child: InkWell(
               borderRadius: radius,
-              onTap: (type == 'file' || type == 'voice') && onOpenFile != null
+
+              // 🔥 LONG PRESS УДАЛЕНИЕ
+              onLongPress: isMine && onDeleteMessage != null
+                  ? () {
+                      showModalBottomSheet(
+                        context: context,
+                        builder: (_) => SafeArea(
+                          child: ListTile(
+                            leading: const Icon(Icons.delete, color: Colors.red),
+                            title: const Text('Удалить сообщение'),
+                            onTap: () {
+                              Navigator.pop(context);
+                              onDeleteMessage!();
+                            },
+                          ),
+                        ),
+                      );
+                    }
+                  : null,
+
+              onTap: (type == 'file' || type == 'voice') &&
+                      onOpenFile != null
                   ? () => onOpenFile!(message)
                   : null,
+
               child: Container(
                 padding: const EdgeInsets.fromLTRB(14, 10, 14, 8),
                 decoration: BoxDecoration(
@@ -228,18 +269,12 @@ class MessageTile extends StatelessWidget {
                       mainAxisSize: MainAxisSize.min,
                       children: [
                         if (verified == true) ...[
-                          const Icon(
-                            Icons.verified_user_rounded,
-                            size: 14,
-                            color: AppTheme.primary,
-                          ),
+                          const Icon(Icons.verified_user_rounded,
+                              size: 14, color: AppTheme.primary),
                           const SizedBox(width: 4),
                         ] else if (verified == false) ...[
-                          const Icon(
-                            Icons.warning_amber_rounded,
-                            size: 14,
-                            color: AppTheme.danger,
-                          ),
+                          const Icon(Icons.warning_amber_rounded,
+                              size: 14, color: AppTheme.danger),
                           const SizedBox(width: 4),
                         ],
                         Text(
@@ -251,11 +286,8 @@ class MessageTile extends StatelessWidget {
                         ),
                         if (isMine) ...[
                           const SizedBox(width: 4),
-                          const Icon(
-                            Icons.done_all_rounded,
-                            size: 15,
-                            color: AppTheme.primary,
-                          ),
+                          const Icon(Icons.done_all_rounded,
+                              size: 15, color: AppTheme.primary),
                         ],
                       ],
                     ),

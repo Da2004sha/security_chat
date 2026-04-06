@@ -506,3 +506,39 @@ async def ws_endpoint(ws: WebSocket, token: str = Query(...)):
             await ws.receive_text()
     except Exception:
         pass
+
+@app.delete("/messages/{message_id}")
+def delete_message(
+    message_id: int,
+    me: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    msg = db.get(Message, message_id)
+    if not msg:
+        raise HTTPException(404, "Message not found")
+
+    _ensure_chat_member(db, msg.chat_id, me.id)
+
+    if msg.sender_user_id != me.id:
+        raise HTTPException(403, "You can delete only your messages")
+
+    msg.is_deleted = True
+    db.commit()
+
+    return {"status": "deleted", "message_id": message_id}
+
+@app.post("/auth/change-password")
+def change_password(
+    data: ChangePasswordIn,
+    me: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    user = db.get(User, me.id)
+
+    if not verify_password(data.current_password, user.password_hash):
+        raise HTTPException(400, "Неверный текущий пароль")
+
+    user.password_hash = hash_password(data.new_password)
+    db.commit()
+
+    return {"status": "ok"}

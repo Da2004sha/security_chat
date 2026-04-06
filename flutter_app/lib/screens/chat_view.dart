@@ -205,13 +205,29 @@ class _ChatViewScreenState extends State<ChatViewScreen> {
 
       for (final m in res.cast<Map<String, dynamic>>()) {
         try {
+          final senderId = m['sender_user_id'] as int?;
+          final senderDeviceId = m['sender_device_id'] as int?;
+
+          if (m['is_deleted'] == true) {
+            out.add({
+              'id': m['id'],
+              'sender_user_id': senderId,
+              'sender_device_id': senderDeviceId,
+              'created_at': m['created_at'],
+              'sender_username':
+                  _usernamesById[senderId ?? -1] ?? 'Пользователь',
+              'verified': null,
+              'type': 'deleted',
+              'text': 'Сообщение удалено',
+            });
+            continue;
+          }
+
           final plain = await CryptoService.instance.decryptJson(
             payloadJson: m['payload_json'],
             key: _chatKey!,
           );
 
-          final senderId = m['sender_user_id'] as int?;
-          final senderDeviceId = m['sender_device_id'] as int?;
           bool? verified;
           final signatureB64 = m['signature_b64']?.toString();
           final signPub =
@@ -293,6 +309,18 @@ class _ChatViewScreenState extends State<ChatViewScreen> {
       });
     } finally {
       _refreshing = false;
+    }
+  }
+
+  Future<void> _deleteMessage(int messageId) async {
+    try {
+      await Api.instance.delete('/messages/$messageId');
+      await _loadHistory(silent: true);
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        err = e.toString().replaceFirst('Exception: ', '');
+      });
     }
   }
 
@@ -797,6 +825,11 @@ class _ChatViewScreenState extends State<ChatViewScreen> {
                                   senderName: senderName,
                                   showSender: showSender,
                                   onOpenFile: _handleOpenAttachment,
+                                  onDeleteMessage: isMine &&
+                                          msg['type'] != 'deleted' &&
+                                          msg['id'] != null
+                                      ? () => _deleteMessage(msg['id'] as int)
+                                      : null,
                                 ),
                               ],
                             );

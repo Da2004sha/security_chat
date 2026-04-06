@@ -12,11 +12,6 @@ class User(Base):
     password_hash: Mapped[str] = mapped_column(String(255))
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
-    devices: Mapped[list["Device"]] = relationship(
-        back_populates="user",
-        cascade="all, delete-orphan",
-    )
-
 
 class Device(Base):
     __tablename__ = "devices"
@@ -84,6 +79,8 @@ class Message(Base):
     signature_b64: Mapped[str | None] = mapped_column(Text, nullable=True)
     sig_alg: Mapped[str | None] = mapped_column(String(32), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+    is_deleted: Mapped[bool] = mapped_column(Boolean, default=False)
 
 
 class Attachment(Base):
