@@ -12,21 +12,13 @@ void main() async {
 
   // Для тестов через ngrok на Android/Windows.
   // Это ослабляет проверку сертификатов, поэтому для продакшена так не оставляют.
-  HttpOverrides.global = _DevHttpOverrides();
+  
 
   await Session.instance.init();
   runApp(const App());
 }
 
-class _DevHttpOverrides extends HttpOverrides {
-  @override
-  HttpClient createHttpClient(SecurityContext? context) {
-    final client = super.createHttpClient(context);
-    client.badCertificateCallback =
-        (X509Certificate cert, String host, int port) => true;
-    return client;
-  }
-}
+
 
 class App extends StatelessWidget {
   const App({super.key});
