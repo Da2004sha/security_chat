@@ -31,6 +31,7 @@ class Session {
   static String _chatKeyStorageKey(int chatId) => 'chatKey_$chatId';
 
   Future<void> init() async {
+  try {
     token = await _storage.read(key: _kToken);
 
     final userIdStr = await _storage.read(key: _kUserId);
@@ -44,7 +45,15 @@ class Session {
     x25519PublicKeyB64 = await _storage.read(key: _kXPub);
     ed25519PrivateKeyB64 = await _storage.read(key: _kEdPriv);
     ed25519PublicKeyB64 = await _storage.read(key: _kEdPub);
+  } catch (e) {
+    print('SECURE STORAGE ERROR: $e');
+
+    // Сброс всего чтобы не падало
+    token = null;
+    userId = null;
+    deviceId = null;
   }
+}
 
   bool get isAuthed => token != null && userId != null;
 
