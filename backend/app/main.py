@@ -419,18 +419,19 @@ def list_messages(
     msgs = list(reversed(msgs))
 
     return [
-        MessageOut(
-            id=m.id,
-            chat_id=m.chat_id,
-            sender_user_id=m.sender_user_id,
-            sender_device_id=m.sender_device_id,
-            payload_json=m.payload_json,
-            signature_b64=m.signature_b64,
-            sig_alg=m.sig_alg,
-            created_at=m.created_at.isoformat(),
-        )
-        for m in msgs
-    ]
+    MessageOut(
+        id=m.id,
+        chat_id=m.chat_id,
+        sender_user_id=m.sender_user_id,
+        sender_device_id=m.sender_device_id,
+        payload_json=m.payload_json,
+        signature_b64=m.signature_b64,
+        sig_alg=m.sig_alg,
+        created_at=m.created_at.isoformat(),
+        is_deleted=m.is_deleted,
+    )
+    for m in msgs
+]
 
 
 @app.post("/attachments", response_model=UploadOut)
